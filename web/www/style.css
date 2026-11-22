@@ -32,6 +32,9 @@ body {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   font-size: 13.6px;
   line-height: 1.25;
+  /* Stroke widths for painted box-drawing lines. */
+  --light: max(1px, 0.08em);
+  --heavy: max(2px, 0.16em);
   white-space: pre;
 }
 
@@ -59,7 +62,7 @@ body {
   vertical-align: top;
 }
 
-/* Block elements are painted, not drawn from a font. The paint bleeds a fraction of a pixel past
+/* Block elements and box-drawing lines are painted, not drawn from a font. The paint bleeds a fraction of a pixel past
    the cell so neighbouring blocks join without anti-aliasing seams at fractional cell edges. */
 #term span.block {
   position: relative;
@@ -71,6 +74,30 @@ body {
   position: absolute;
   inset: -0.4px;
   background: var(--quadrants);
+  /* Above every cell's background, whose seam-hiding bleed would otherwise cover line ends. */
+  z-index: 1;
+}
+
+#term span.path {
+  position: relative;
+  overflow: visible;
+}
+
+#term span.path svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  z-index: 1;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--light);
+  stroke-linecap: square;
+}
+
+#term span.path path {
+  vector-effect: non-scaling-stroke;
 }
 
 .red { color: rgb(230 70 60); }
@@ -79,6 +106,14 @@ body {
 .wall { color: rgb(140 140 140); }
 .floor { color: rgb(70 70 70); }
 .door,
-.key,
-.title { color: rgb(230 230 230); }
+.key { color: rgb(230 230 230); }
+.ink { color: rgb(12 12 12); }
+.slab { color: rgb(240 240 240); }
+
+/* Background colors. The spread shadow bleeds a fraction of a pixel past the cell so neighbouring
+   cells join without seams at fractional cell edges. */
+.bg-slab {
+  background: rgb(240 240 240);
+  box-shadow: 0 0 0 0.4px rgb(240 240 240);
+}
 .hint { color: rgb(110 110 110); }

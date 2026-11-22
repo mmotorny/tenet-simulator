@@ -55,14 +55,21 @@ fn parse_args() -> Result<Options, String> {
 
 const USAGE: &str = "usage: tenet [--moves wasd...] [--trace | --svg] [--no-color] [LEVEL_FILE]";
 
-fn paint(out: &mut String, text: &str, color: Option<Color>, enabled: bool) {
-    match color {
-        Some(c) if enabled => {
-            let (r, g, b) = c.rgb();
-            out.push_str(&format!("\x1b[38;2;{r};{g};{b}m{text}\x1b[0m"));
-        }
-        _ => out.push_str(text),
+fn paint(out: &mut String, text: &str, color: Option<Color>, bg: Option<Color>, enabled: bool) {
+    if !enabled || (color.is_none() && bg.is_none()) {
+        out.push_str(text);
+        return;
     }
+    if let Some(c) = color {
+        let (r, g, b) = c.rgb();
+        out.push_str(&format!("\x1b[38;2;{r};{g};{b}m"));
+    }
+    if let Some(c) = bg {
+        let (r, g, b) = c.rgb();
+        out.push_str(&format!("\x1b[48;2;{r};{g};{b}m"));
+    }
+    out.push_str(text);
+    out.push_str("\x1b[0m");
 }
 
 const PLAYING_HINTS: &[view::Hint] = &[("←↑↓→ wasd hjkl", "move"), ("r", "restart"), ("q esc", "quit")];
@@ -75,10 +82,10 @@ fn screen(game: &Game) -> view::Screen {
 /// A row of glyphs as optionally colored text.
 fn line(row: &[Glyph], color: bool) -> String {
     let mut out = String::new();
-    // Group runs of the same color to keep escape sequences short.
-    for run in row.chunk_by(|a, b| a.color == b.color) {
+    // Group runs of the same colors to keep escape sequences short.
+    for run in row.chunk_by(|a, b| (a.color, a.bg) == (b.color, b.bg)) {
         let text: String = run.iter().map(|g| g.ch).collect();
-        paint(&mut out, &text, run[0].color, color);
+        paint(&mut out, &text, run[0].color, run[0].bg, color);
     }
     out
 }

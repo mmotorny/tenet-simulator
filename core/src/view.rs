@@ -24,8 +24,10 @@ pub enum Color {
     Key,
     /// The action a hint describes, and the separators between hints.
     Hint,
-    /// Neutral parts of the title logo.
-    Title,
+    /// The title logo's letters: black, as in the film.
+    Ink,
+    /// The white slab behind the title logo.
+    Slab,
 }
 
 impl Color {
@@ -37,7 +39,9 @@ impl Color {
             Color::Glass => (190, 205, 215),
             Color::Wall => (140, 140, 140),
             Color::Floor => (70, 70, 70),
-            Color::Door | Color::Key | Color::Title => (230, 230, 230),
+            Color::Door | Color::Key => (230, 230, 230),
+            Color::Ink => (12, 12, 12),
+            Color::Slab => (240, 240, 240),
             Color::Hint => (110, 110, 110),
         }
     }
@@ -46,14 +50,25 @@ impl Color {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Glyph {
     pub ch: char,
+    /// Foreground color; `None` is the front end's default text color.
     pub color: Option<Color>,
+    /// Background color; `None` is the front end's default background.
+    pub bg: Option<Color>,
 }
 
 impl Glyph {
-    pub const BLANK: Glyph = Glyph { ch: ' ', color: None };
+    pub const BLANK: Glyph = Glyph { ch: ' ', color: None, bg: None };
 
-    const fn new(ch: char, color: Color) -> Self {
-        Self { ch, color: Some(color) }
+    pub const fn new(ch: char, color: Color) -> Self {
+        Self { ch, color: Some(color), bg: None }
+    }
+
+    pub const fn plain(ch: char, color: Option<Color>) -> Self {
+        Self { ch, color, bg: None }
+    }
+
+    pub const fn on(ch: char, color: Option<Color>, bg: Color) -> Self {
+        Self { ch, color, bg: Some(bg) }
     }
 }
 
@@ -186,7 +201,7 @@ pub fn render(game: &Game) -> Vec<Vec<Glyph>> {
 }
 
 fn text(s: &str, color: Option<Color>) -> Vec<Glyph> {
-    s.chars().map(|ch| Glyph { ch, color }).collect()
+    s.chars().map(|ch| Glyph::plain(ch, color)).collect()
 }
 
 /// One status-line hint: keys (space-separated groups, e.g. `"←↑↓→ wasd"`) and what they do.
@@ -198,7 +213,7 @@ fn hints(list: &[Hint]) -> Vec<Glyph> {
         if i > 0 {
             out.extend(text(" · ", Some(Color::Hint)));
         }
-        out.extend(keys.chars().map(|ch| Glyph { ch, color: (ch != ' ').then_some(Color::Key) }));
+        out.extend(keys.chars().map(|ch| Glyph::plain(ch, (ch != ' ').then_some(Color::Key))));
         out.extend(text(" ", None));
         out.extend(text(action, Some(Color::Hint)));
     }
@@ -305,6 +320,15 @@ pub fn to_svg(rows: &[Vec<Glyph>]) -> String {
     for (y, row) in rows.iter().enumerate() {
         let baseline = PAD + y as f32 * CELL_H + CELL_H * 0.75;
         for (x, glyph) in row.iter().enumerate() {
+            if let Some(bg) = glyph.bg {
+                let (r, g, b) = bg.rgb();
+                svg.push_str(&format!(
+                    "<rect x=\"{}\" y=\"{}\" width=\"{CELL_W}\" height=\"{CELL_H}\" \
+                     fill=\"rgb({r},{g},{b})\" shape-rendering=\"crispEdges\"/>\n",
+                    PAD + x as f32 * CELL_W,
+                    PAD + y as f32 * CELL_H
+                ));
+            }
             if glyph.ch == ' ' || glyph.ch == '\u{2800}' {
                 continue;
             }
@@ -416,10 +440,11 @@ mod tests {
         let rows = screen(&game, &[("q", "quit")], &[]).stacked(true);
         let text = to_plain_text(&rows);
         let lines: Vec<&str> = text.lines().collect();
-        // Title (33 wide) is the widest block; the 29-wide map is indented by two, the label hangs.
-        assert!(lines[0].starts_with("╶─┬─╴"));
-        assert!(lines[6].starts_with("  ┏━━"));
-        assert!(lines[8].ends_with("⠀    t = 0 ▲"));
+        // Title slab (37 wide) is the widest block; the 29-wide map is indented by 4, the label hangs.
+        assert!(lines[0].starts_with("▄▄▄▄"));
+        assert!(lines[1].starts_with("  ╶─┬─╴"));
+        assert!(lines[8].starts_with("    ┏━━"));
+        assert!(lines[10].ends_with("⠀    t = 0 ▲"));
         assert_eq!(lines.last().unwrap().trim(), "q quit");
     }
 
@@ -429,6 +454,9 @@ mod tests {
         let svg = to_svg(&rows);
         assert_eq!(svg.matches("<text ").count(), 5); // the space is skipped
         assert_eq!(svg.matches("<line ").count(), 1); // the diagonal is drawn as a line
+
+        let slab = to_svg(&[vec![Glyph::on(' ', None, Color::Slab)]]);
+        assert_eq!(slab.matches("<rect x=").count(), 1); // backgrounds are painted even under spaces
 
         let blocks = to_svg(&[text("█▀", Some(Color::Red))]);
         assert_eq!(blocks.matches("<rect x=").count(), 6); // block quadrants become rectangles

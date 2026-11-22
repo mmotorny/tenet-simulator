@@ -57,7 +57,7 @@ impl WebGame {
         self.game.status() == Status::Exited
     }
 
-    /// The title logo, encoded as described in [`encode`].
+    /// The title logo (black letters on a white slab), encoded as described in [`encode`].
     pub fn title(&self) -> String {
         encode(&self.screen().title)
     }
@@ -83,30 +83,27 @@ impl WebGame {
     }
 }
 
-/// Encodes rows for the page: rows are separated by newlines, and each glyph is followed by its
-/// color code: `r` red, `b` blue, `g` glass, `w` wall, `f` floor, `d` door, `k` key, `h` hint,
-/// `t` title, `.` default.
+/// Encodes rows for the page: rows are separated by newlines, and each glyph is followed by two
+/// color codes, foreground then background: `r` red, `b` blue, `g` glass, `w` wall, `f` floor,
+/// `d` door, `k` key, `h` hint, `i` ink, `s` slab, `.` default.
 fn encode(rows: &[Vec<view::Glyph>]) -> String {
+    fn code(color: Option<Color>) -> char {
+        match color {
+            Some(Color::Red) => 'r',
+            Some(Color::Blue) => 'b',
+            Some(Color::Glass) => 'g',
+            Some(Color::Wall) => 'w',
+            Some(Color::Floor) => 'f',
+            Some(Color::Door) => 'd',
+            Some(Color::Key) => 'k',
+            Some(Color::Hint) => 'h',
+            Some(Color::Ink) => 'i',
+            Some(Color::Slab) => 's',
+            None => '.',
+        }
+    }
     rows.iter()
-        .map(|row| {
-            row.iter()
-                .flat_map(|g| {
-                    let code = match g.color {
-                        Some(Color::Red) => 'r',
-                        Some(Color::Blue) => 'b',
-                        Some(Color::Glass) => 'g',
-                        Some(Color::Wall) => 'w',
-                        Some(Color::Floor) => 'f',
-                        Some(Color::Door) => 'd',
-                        Some(Color::Key) => 'k',
-                        Some(Color::Hint) => 'h',
-                        Some(Color::Title) => 't',
-                        None => '.',
-                    };
-                    [g.ch, code]
-                })
-                .collect::<String>()
-        })
+        .map(|row| row.iter().flat_map(|g| [g.ch, code(g.color), code(g.bg)]).collect::<String>())
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -120,12 +117,14 @@ mod tests {
         let game = WebGame::new().unwrap();
         let board = game.board();
         let rows: Vec<Vec<char>> = board.split('\n').map(|r| r.chars().collect()).collect();
-        assert!(rows.iter().all(|r| r.len() % 2 == 0));
-        assert_eq!(rows[0][..4], ['┏', 'w', '━', 'w']);
+        assert!(rows.iter().all(|r| r.len() % 3 == 0));
+        assert_eq!(rows[0][..6], ['┏', 'w', '.', '━', 'w', '.']);
         assert_eq!(game.board_width(), 29);
-        let status: String = game.status().chars().step_by(2).collect();
+        let status: String = game.status().chars().step_by(3).collect();
         assert_eq!(status, "←↑↓→ wasd hjkl swipe move · r restart");
-        assert_eq!(game.title().split('\n').count(), 5);
+        let title: Vec<char> = game.title().chars().collect();
+        assert_eq!(title[..3], ['▄', 's', '.']); // slab edge: white half block
+        assert_eq!(game.title().split('\n').count(), 7);
     }
 
     #[test]
