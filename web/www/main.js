@@ -45,7 +45,7 @@ function paintBlock(cell, mask) {
 
 // Box-drawing glyphs, painted like a terminal emulator does so lines meet exactly across cells:
 // the directions each line leaves the cell in (left, right, up, down) and its weight.
-// Each direction is followed by its weight: 1 light, 2 heavy.
+// Each direction is followed by its weight: 1 light, 2 heavy. Mirrors view::line_arms in the core.
 const LINES = {
   "─": "l1r1", "│": "u1d1", "┌": "r1d1", "┐": "l1d1", "└": "r1u1", "┘": "l1u1",
   "├": "u1d1r1", "┤": "u1d1l1", "┬": "l1r1d1", "┴": "l1r1u1", "┼": "l1r1u1d1", "╴": "l1", "╶": "r1",
@@ -60,7 +60,9 @@ const PATHS = {
   "╰": "M.5 0A.5 .5 0 0 0 1 .5", "╯": "M.5 0A.5 .5 0 0 1 0 .5",
   "╲": "M0 0L1 1", "╱": "M0 1L1 0",
 };
+// Stroke widths by weight; heavy strokes of bold glyphs are drawn heavier still.
 const STROKE = { 1: "var(--light)", 2: "var(--heavy)" };
+const BOLD_STROKE = { 1: "var(--light)", 2: "var(--bold)" };
 
 function bar(position, size) {
   return `linear-gradient(currentColor, currentColor) ${position} / ${size} no-repeat`;
@@ -74,12 +76,13 @@ function arm(dir, t, across) {
   return bar(...ends[dir]);
 }
 
-function lineLayers(ch) {
+function lineLayers(ch, bold) {
   const spec = LINES[ch];
+  const stroke = bold ? BOLD_STROKE : STROKE;
   if (spec) {
     // Horizontal arms reach to the far edge of the vertical stroke, and vice versa, so mixed
     // weights still meet squarely in the middle.
-    const parts = spec.match(/[lrud]\d/g).map((p) => [p[0], STROKE[p[1]]]);
+    const parts = spec.match(/[lrud]\d/g).map((p) => [p[0], stroke[p[1]]]);
     const widest = (dirs) => parts.filter(([d]) => dirs.includes(d)).map(([, t]) => t);
     const reach = (ts) => (ts.length ? `max(${ts.join(", ")})` : "0px");
     const vertical = reach(widest("ud"));
@@ -124,7 +127,7 @@ function show(el, cells) {
       const ch = String.fromCodePoint(chars[i]);
       const cell = document.createElement("span");
       const mask = QUADRANTS[ch];
-      const lines = lineLayers(ch);
+      const lines = lineLayers(ch, bold[i]);
       if (mask) paintBlock(cell, mask);
       else if (lines) paintLines(cell, lines);
       else if (PATHS[ch]) paintPath(cell, PATHS[ch]);

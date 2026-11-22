@@ -9,12 +9,16 @@
 
 use crate::view::{Color, Glyph};
 
-// As in the film's logo, vertical strokes are heavier than horizontal ones: mixed-weight
-// box-drawing glyphs (heavy vertical, light horizontal). Diagonals are bold too, but Unicode has
-// no heavy diagonal, so they carry the bold attribute instead.
+// Stroke contrast as in the film's logo: the stems of T and E are heavy and horizontals light,
+// via mixed-weight box-drawing glyphs (heavy vertical, light horizontal). The N inverts that, as
+// in classic high-contrast type: light verticals, heavy diagonal. Heavy strokes also carry the
+// bold attribute, which front ends that paint lines themselves (web, SVG) draw heavier still;
+// Unicode has nothing heavier than heavy, and no heavy diagonal at all.
 const T: [&str; 5] = ["╶─┰─╴", "  ┃  ", "  ┃  ", "  ┃  ", "  ┃  "];
 const E: [&str; 5] = ["┎───", "┃   ", "┠── ", "┃   ", "┖───"];
-const N: [&str; 5] = ["┃╲    ┃", "┃ ╲   ┃", "┃  ╲  ┃", "┃   ╲ ┃", "┃    ╲┃"];
+const N: [&str; 5] = ["│╲    │", "│ ╲   │", "│  ╲  │", "│   ╲ │", "│    ╲│"];
+/// Glyphs whose heavy strokes are drawn bold: heavy verticals and the diagonal.
+const BOLD: &str = "┃┎┒┖┚┠┨┰┸╲";
 /// E rotated 180°.
 const E_INV: [&str; 5] = ["───┒", "   ┃", " ──┨", "   ┃", "───┚"];
 /// T rotated 180°.
@@ -43,7 +47,7 @@ pub fn logo() -> Vec<Vec<Glyph>> {
         let mut line: Vec<Glyph> = pad().collect();
         line.extend(row.chars().map(|ch| {
             let glyph = Glyph::on(ch, (ch != ' ').then_some(Color::Ink), Color::Slab);
-            if ch == '╲' { glyph.bold() } else { glyph }
+            if BOLD.contains(ch) { glyph.bold() } else { glyph }
         }));
         line.extend(pad());
         logo.push(line);
@@ -106,6 +110,9 @@ mod tests {
         assert!(rows[6].iter().all(|g| g.ch == '▀' && g.color == Some(Color::Slab) && g.bg.is_none()));
         assert!(rows[1..6].iter().flatten().all(|g| g.bg == Some(Color::Slab)));
         assert!(rows[1..6].iter().flatten().filter(|g| g.ch != ' ').all(|g| g.color == Some(Color::Ink)));
-        assert!(rows[1..6].iter().flatten().all(|g| g.bold == (g.ch == '╲'))); // only diagonals are bold
+        assert!(rows[1..6].iter().flatten().all(|g| g.bold == BOLD.contains(g.ch)));
+        // The N's verticals stay light; only its diagonal is bold.
+        let n_row: String = rows[1].iter().map(|g| g.ch).collect();
+        assert!(n_row.contains("│╲    │"));
     }
 }

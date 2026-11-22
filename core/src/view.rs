@@ -307,6 +307,43 @@ pub fn block_quadrants(ch: char) -> Option<[bool; 4]> {
     })
 }
 
+/// Stroke weights of a box-drawing glyph's arms, toward the left, right, top and bottom edges of
+/// the cell: 0 none, 1 light, 2 heavy. Front ends that paint lines themselves (SVG, the web page,
+/// which mirrors this table in `web/www/main.js`) use it so lines meet exactly across cells.
+pub fn line_arms(ch: char) -> Option<[u8; 4]> {
+    Some(match ch {
+        '─' => [1, 1, 0, 0],
+        '│' => [0, 0, 1, 1],
+        '┌' => [0, 1, 0, 1],
+        '┐' => [1, 0, 0, 1],
+        '└' => [0, 1, 1, 0],
+        '┘' => [1, 0, 1, 0],
+        '├' => [0, 1, 1, 1],
+        '┤' => [1, 0, 1, 1],
+        '┬' => [1, 1, 0, 1],
+        '┴' => [1, 1, 1, 0],
+        '┼' => [1, 1, 1, 1],
+        '╴' => [1, 0, 0, 0],
+        '╶' => [0, 1, 0, 0],
+        '━' => [2, 2, 0, 0],
+        '┃' => [0, 0, 2, 2],
+        '┏' => [0, 2, 0, 2],
+        '┓' => [2, 0, 0, 2],
+        '┗' => [0, 2, 2, 0],
+        '┛' => [2, 0, 2, 0],
+        // Heavy vertical, light horizontal.
+        '┎' => [0, 1, 0, 2],
+        '┒' => [1, 0, 0, 2],
+        '┖' => [0, 1, 2, 0],
+        '┚' => [1, 0, 2, 0],
+        '┠' => [0, 1, 2, 2],
+        '┨' => [1, 0, 2, 2],
+        '┰' => [1, 1, 0, 2],
+        '┸' => [1, 1, 2, 0],
+        _ => return None,
+    })
+}
+
 /// Renders rows as a standalone SVG image. Every glyph is placed at its exact grid position, so
 /// rows stay aligned whatever fonts the viewer substitutes (unlike text in a Markdown code block).
 pub fn to_svg(rows: &[Vec<Glyph>]) -> String {
@@ -314,6 +351,10 @@ pub fn to_svg(rows: &[Vec<Glyph>]) -> String {
     const CELL_W: f32 = FONT * 0.6;
     const CELL_H: f32 = FONT * 1.25;
     const PAD: f32 = 2.0 * CELL_W;
+    /// Stroke widths: light, heavy, and heavy drawn bold (four times light).
+    const LIGHT: f32 = 1.2;
+    const HEAVY: f32 = 2.4;
+    const BOLD: f32 = 4.8;
     let cols = rows.iter().map(Vec::len).max().unwrap_or(0);
     let width = cols as f32 * CELL_W + 2.0 * PAD;
     let height = rows.len() as f32 * CELL_H + 2.0 * PAD;
@@ -367,28 +408,76 @@ pub fn to_svg(rows: &[Vec<Glyph>]) -> String {
                 let (left, right) = (cx - CELL_W / 2.0, cx + CELL_W / 2.0);
                 let (top, bottom) = (PAD + y as f32 * CELL_H, PAD + (y + 1) as f32 * CELL_H);
                 let (y1, y2) = if glyph.ch == '╲' { (top, bottom) } else { (bottom, top) };
-                let width = if glyph.bold { 2.4 } else { 1.2 };
+                let width = if glyph.bold { BOLD } else { LIGHT };
                 svg.push_str(&format!(
                     "<line x1=\"{left}\" y1=\"{y1}\" x2=\"{right}\" y2=\"{y2}\" \
                      stroke=\"rgb({r},{g},{b})\" stroke-width=\"{width}\" stroke-linecap=\"square\"/>\n"
                 ));
                 continue;
             }
-            // Stretch line-drawing glyphs to exactly one cell so lines join across cells.
-            let stretch = if ('\u{2500}'..='\u{257F}').contains(&glyph.ch) {
-                format!(" textLength=\"{CELL_W}\" lengthAdjust=\"spacingAndGlyphs\"")
-            } else {
-                String::new()
+            let (left, top) = (cx - CELL_W / 2.0, PAD + y as f32 * CELL_H);
+            let cy = top + CELL_H / 2.0;
+            let fill = format!("rgb({r},{g},{b})");
+            // Box-drawing lines, painted as bars so they meet exactly across cells.
+            if let Some([l, rt, u, d]) = line_arms(glyph.ch) {
+                let width = |w: u8| match w {
+                    2 if glyph.bold => BOLD,
+                    2 => HEAVY,
+                    _ => LIGHT,
+                };
+                let (across_h, across_v) = (width(u.max(d)), width(l.max(rt)));
+                // Bars overlap neighbouring cells by a hair, hiding anti-aliasing seams at cell edges.
+                const BLEED: f32 = 0.25;
+                let mut rect = |x: f32, y: f32, w: f32, h: f32| {
+                    svg.push_str(&format!("<rect x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" fill=\"{fill}\"/>\n"));
+                };
+                let half_h = CELL_W / 2.0 + across_h / 2.0 + BLEED;
+                let half_v = CELL_H / 2.0 + across_v / 2.0 + BLEED;
+                if l > 0 && l == rt {
+                    rect(left - BLEED, cy - width(l) / 2.0, CELL_W + 2.0 * BLEED, width(l));
+                } else {
+                    if l > 0 {
+                        rect(left - BLEED, cy - width(l) / 2.0, half_h, width(l));
+                    }
+                    if rt > 0 {
+                        rect(cx - across_h / 2.0, cy - width(rt) / 2.0, half_h, width(rt));
+                    }
+                }
+                if u > 0 && u == d {
+                    rect(cx - width(u) / 2.0, top - BLEED, width(u), CELL_H + 2.0 * BLEED);
+                } else {
+                    if u > 0 {
+                        rect(cx - width(u) / 2.0, top - BLEED, width(u), half_v);
+                    }
+                    if d > 0 {
+                        rect(cx - width(d) / 2.0, cy - across_v / 2.0, width(d), half_v);
+                    }
+                }
+                continue;
+            }
+            // Rounded corners: elliptical arcs centred on the cell corner between their two ends.
+            let arc = match glyph.ch {
+                '╭' => Some(((left + CELL_W, cy), (cx, top + CELL_H), 0)),
+                '╮' => Some(((left, cy), (cx, top + CELL_H), 1)),
+                '╰' => Some(((cx, top), (left + CELL_W, cy), 0)),
+                '╯' => Some(((cx, top), (left, cy), 1)),
+                _ => None,
             };
+            if let Some(((x1, y1), (x2, y2), sweep)) = arc {
+                let (rx, ry) = (CELL_W / 2.0, CELL_H / 2.0);
+                svg.push_str(&format!(
+                    "<path d=\"M{x1} {y1}A{rx} {ry} 0 0 {sweep} {x2} {y2}\" fill=\"none\" stroke=\"{fill}\" \
+                     stroke-width=\"{LIGHT}\"/>\n"
+                ));
+                continue;
+            }
             let ch = match glyph.ch {
                 '<' => "&lt;".to_string(),
                 '>' => "&gt;".to_string(),
                 '&' => "&amp;".to_string(),
                 c => c.to_string(),
             };
-            svg.push_str(&format!(
-                "<text x=\"{cx}\" y=\"{baseline}\" fill=\"rgb({r},{g},{b})\"{stretch}>{ch}</text>\n"
-            ));
+            svg.push_str(&format!("<text x=\"{cx}\" y=\"{baseline}\" fill=\"{fill}\">{ch}</text>\n"));
         }
     }
     svg.push_str("</svg>\n");
@@ -463,10 +552,12 @@ mod tests {
 
     #[test]
     fn svg_places_every_visible_glyph() {
-        let rows = vec![text("┏━┓ a<╲", Some(Color::Wall))];
+        let rows = vec![text("┏━┓ a<╲╭", Some(Color::Wall))];
         let svg = to_svg(&rows);
-        assert_eq!(svg.matches("<text ").count(), 5); // the space is skipped
+        assert_eq!(svg.matches("<text ").count(), 2); // the space is skipped; lines are painted
         assert_eq!(svg.matches("<line ").count(), 1); // the diagonal is drawn as a line
+        assert_eq!(svg.matches("<path ").count(), 1); // the rounded corner is an arc
+        assert_eq!(svg.matches("<rect x=").count(), 5); // ┏ and ┓ are two arms each, ━ one bar
 
         let slab = to_svg(&[vec![Glyph::on(' ', None, Color::Slab)]]);
         assert_eq!(slab.matches("<rect x=").count(), 1); // backgrounds are painted even under spaces
@@ -474,7 +565,10 @@ mod tests {
         let blocks = to_svg(&[text("█▀", Some(Color::Red))]);
         assert_eq!(blocks.matches("<rect x=").count(), 6); // block quadrants become rectangles
         assert!(!blocks.contains("<text "));
-        assert_eq!(svg.matches("textLength").count(), 3); // only box-drawing glyphs are stretched
+
+        // Bold heavy strokes are drawn four times as wide as light ones.
+        let bold = to_svg(&[vec![Glyph::new('┃', Color::Ink).bold()]]);
+        assert!(bold.contains("width=\"4.8\""));
         assert!(svg.contains("&lt;"));
     }
 

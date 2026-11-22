@@ -39,6 +39,8 @@ body {
   /* Whole pixels, so painted lines stay crisp. */
   --light: round(max(1px, 0.08em), 1px);
   --heavy: round(max(2px, 0.16em), 1px);
+  /* Heavy strokes of bold glyphs, such as the logo's stems and diagonal: four times light. */
+  --bold: calc(4 * var(--light));
   white-space: pre;
 }
 
@@ -108,9 +110,9 @@ body {
   font-weight: bold;
 }
 
-/* Unicode has no heavy diagonals; bold diagonals get the heavy stroke. */
+/* Unicode has no heavy diagonals; bold diagonals get the bold stroke. */
 #term span.path.bold svg {
-  stroke-width: var(--heavy);
+  stroke-width: var(--bold);
 }
 
 .red { color: rgb(230 70 60); }
