@@ -113,6 +113,49 @@ pub enum StepOutcome {
     Exited,
 }
 
+/// Where the protagonist is, when, and which way their time runs: all a move depends on, besides
+/// who else stands where.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Place {
+    pub player: Pos,
+    pub now: i32,
+    pub arrow: Arrow,
+}
+
+/// The rules of one move from `from`, given whether some self stands on a cell at a global time
+/// (which decides the turnstile doors). `None` if the move is blocked.
+pub(crate) fn rule(level: &Level, from: Place, dir: Dir, occupied: impl Fn(Pos, i32) -> bool) -> Option<Place> {
+    let target = dir.offset(from.player);
+    let turnstile = level.turnstile();
+    let crossing = turnstile.is_some_and(|t| t.crosses_mirror(from.player, target));
+    let now = from.now;
+    // Crossing the mirror moves the frontier of consciousness without advancing global time.
+    let arrow = if crossing { from.arrow.reversed() } else { from.arrow };
+    let arrival = if crossing { now } else { now + arrow.dt() };
+    // A turnstile door is closed while anyone stands on the trapdoor on its side of the mirror.
+    let door_open = |side, t| {
+        turnstile.is_none_or(|ts| {
+            !occupied(
+                match side {
+                    Side::Red => ts.red_cell,
+                    Side::Blue => ts.blue_cell,
+                },
+                t,
+            )
+        })
+    };
+    let walkable = match level.tile(target) {
+        // A door must be open now and when you'd arrive: walking into a closed door is not a
+        // move, and doors never open because someone walks into them.
+        Some(Tile::Entry) => [now, arrival].iter().all(|&t| level.entry_open_at(t)),
+        Some(Tile::Exit) => [now, arrival].iter().all(|&t| level.exit_open_at(t)),
+        Some(Tile::TurnstileDoor(side)) => [now, arrival].iter().all(|&t| door_open(side, t)),
+        Some(tile) => tile.is_walkable(),
+        None => false,
+    };
+    walkable.then_some(Place { player: target, now: arrival, arrow })
+}
+
 #[derive(Clone, Debug)]
 pub struct Game {
     level: Level,
@@ -143,6 +186,10 @@ impl Game {
 
     pub fn player(&self) -> Pos {
         *self.active().path.last().expect("a segment always has a position")
+    }
+
+    pub fn place(&self) -> Place {
+        Place { player: self.player(), now: self.now(), arrow: self.arrow() }
     }
 
     pub fn arrow(&self) -> Arrow {
@@ -196,7 +243,12 @@ impl Game {
             Side::Red => turnstile.red_cell,
             Side::Blue => turnstile.blue_cell,
         };
-        !self.segments.iter().any(|s| s.pos_at(t) == Some(trapdoor))
+        !self.occupied(trapdoor, t)
+    }
+
+    /// Whether any self stands on `pos` at global time `t`.
+    pub(crate) fn occupied(&self, pos: Pos, t: i32) -> bool {
+        self.segments.iter().any(|s| s.pos_at(t) == Some(pos))
     }
 
     /// Every door and whether it is open at global time `t`: the entry and exit doors, then the
@@ -239,26 +291,12 @@ impl Game {
         if self.status == Status::Exited {
             return StepOutcome::Blocked;
         }
-        let from = self.player();
-        let target = dir.offset(from);
-        let crossing = self.level.turnstile().is_some_and(|t| t.crosses_mirror(from, target));
-        let now = self.now();
-        // Crossing the mirror moves the frontier of consciousness without advancing global time.
-        let arrow = if crossing { self.arrow().reversed() } else { self.arrow() };
-        let arrival = if crossing { now } else { now + arrow.dt() };
-        let walkable = match self.level.tile(target) {
-            // A door must be open now and when you'd arrive: walking into a closed door is not a
-            // move, and doors never open because someone walks into them.
-            Some(Tile::Entry) => [now, arrival].iter().all(|&t| self.level.entry_open_at(t)),
-            Some(Tile::Exit) => [now, arrival].iter().all(|&t| self.level.exit_open_at(t)),
-            Some(Tile::TurnstileDoor(side)) => [now, arrival].iter().all(|&t| self.turnstile_door_open_at(side, t)),
-            Some(tile) => tile.is_walkable(),
-            None => false,
-        };
-        if !walkable {
+        let Some(next) = rule(&self.level, self.place(), dir, |pos, t| self.occupied(pos, t)) else {
             return StepOutcome::Blocked;
-        }
-
+        };
+        let target = next.player;
+        let crossing = next.arrow != self.arrow();
+        let (arrow, arrival) = (next.arrow, next.now);
         self.moves += 1;
         if crossing {
             self.segments.push(Segment { arrow, start: arrival, path: vec![target] });

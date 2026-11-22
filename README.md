@@ -17,9 +17,11 @@ You start on `▶` outside the west door and finish by stepping onto `■` outsi
 
 The way through is the turnstile. Walk in through its red door and cross the invisible mirror in the middle: you become inverted, and from then on every move takes you one step back in global time. The perfect run is a palindrome: you leave at t = 0, at the very moment you arrived.
 
-The universe is strongly deterministic. It always shows one consistent history: your lived past plus the rest of it, predicted by a solver. So your future, inverted self is there from the first moment, standing on `■`, and walks backward to meet you at the mirror. Deviate and the universe finds another consistent history; break your own past (say, by closing a door your earlier self already walked through) and it collapses in a paradox. The timeline under the board shows each stretch of your worldline as a swimlane, dashed where it's still only predicted.
+The universe is strongly deterministic. It always shows one consistent history: your lived past plus the rest of it, predicted by a solver. So your future, inverted self is there from the first moment, standing on `■`, and walks backward to meet you at the mirror. Deviate and the universe finds another consistent history, in which your other selves mirror your moves where they can. Break your own past (say, by closing a door your earlier self already walked through), or leave no way out within 500 moves, and it collapses in a paradox. The timeline under the board shows each stretch of your worldline as a swimlane, dashed where it's still only predicted; once it's wider than the room, it scrolls with you.
 
-Each level has a par, the fewest moves that finish it, shown as `moves/par`: `✓` when you finish within it, `✗` once you pass it. Live your future selves exactly as you first saw them, by memory and mirrored in time, and you earn *strong determinism*. After winning, your worldline becomes a tape of consciousness you can rewind and replay.
+Your moves form a tape of consciousness. Rewind and replay it at any time: the history stays as it is and only your point of view moves along it. Move from a rewound moment and the tape is cut there; restart and it's erased. A paradox is just a moment on the tape, so rewinding undoes it.
+
+Each level has a par, the fewest moves that finish it, shown as `moves/par`: `✓` when you finish within it, `✗` once you pass it. Live your future selves exactly as you first saw them, by memory and mirrored in time, and you earn *strong determinism*. After winning, the tape plays back by itself.
 
 ## Legend
 
@@ -31,6 +33,7 @@ Each level has a par, the fewest moves that finish it, shown as `moves/par`: `�
 | `⠀` → `⣿` | door, open → closed |
 | `▶` / `■` | start / finish |
 | `━` `╌` `┓┛` `╋` | timeline: a lived swimlane, a predicted one, an inversion joining two lanes, passing through a door |
+| `‹` / `›` | timeline: the lane goes on past the edge |
 
 Without color, inverted selves are drawn as diamonds (`◆` / `◇`).
 
@@ -39,15 +42,14 @@ Without color, inverted selves are drawn as diamonds (`◆` / `◇`).
 | Key | Action |
 |---|---|
 | Arrows or `WASD` | move |
-| `U` | undo |
-| `R` | restart |
+| `J` / `K` / `L` | rewind / pause / play the tape (again for 2×, 4×) |
+| `,` / `.` | step the tape back / forward |
+| `Space` | play or pause the tape |
+| `R` | restart (erases the tape) |
 | `?` | show or hide the legend |
-| `J` / `K` / `L` | after winning: rewind / pause / play the tape (again for 2×, 4×) |
-| `,` / `.` | after winning: step the tape back / forward |
-| `Space` | after winning: play or pause the tape |
 | `Q` / `Esc` | quit (terminal) |
 
-On touch screens, swipe to move. After winning, tap to play or pause the tape and swipe left or right to step it.
+Every key in the hint bar can be clicked or tapped too. The mouse wheel scrolls through the tape. On touch screens, swipe the board to move and swipe the timeline to scroll through the tape (it flings on and slows down, like a list).
 
 ## Build and run: terminal
 
@@ -94,7 +96,7 @@ cargo run -q -- --demo-svg > docs/demo.svg
 
 | Path | Contents |
 |---|---|
-| `core/` | Everything: levels, rules, the solver, the play session (undo, animations, the tape), a renderer-agnostic view and layout, and the painter shared by the web canvas and the SVG export. No I/O, no dependencies. |
+| `core/` | Everything: levels, rules, the solver, the play session (the tape, animations, gestures), a renderer-agnostic view and layout, and the painter shared by the web canvas and the SVG export. No I/O, no dependencies. |
 | `core/levels/` | Level maps, one character per cell (legend in `core/src/level.rs`). |
 | `cli/` | Terminal front end (crossterm): maps keys to session inputs and prints the screen. |
 | `web/` | WebAssembly front end that draws the same screen onto a canvas, like a terminal emulator; the static page is in `www/`. |

@@ -9,6 +9,7 @@
 
 use crate::game::{Arrow, Game, SelfAt, Status};
 use crate::level::{Pos, Tile};
+use crate::session::Input;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Color {
@@ -32,6 +33,8 @@ pub enum Color {
     Ink,
     /// The white slab behind the title logo.
     Slab,
+    /// Behind the toolbar target under the mouse.
+    Hover,
 }
 
 impl Color {
@@ -49,6 +52,7 @@ impl Color {
             Color::Ink => (12, 12, 12),
             Color::Slab => (240, 240, 240),
             Color::Hint => (110, 110, 110),
+            Color::Hover => (60, 60, 60),
         }
     }
 }
@@ -342,6 +346,10 @@ pub struct Screen {
     /// next to the `▼` may hang past it.
     pub timeline_width: usize,
     pub status: Vec<Glyph>,
+    /// The clickable parts of the status line (see [`toolbar_targets`]).
+    pub targets: Vec<Target>,
+    /// The target under the mouse, drawn highlighted.
+    pub hover: Option<usize>,
 }
 
 /// The timeline: a global-time axis, with the current time labelled among the ticks, and one
@@ -354,17 +362,58 @@ pub fn timeline(game: &Game) -> (Vec<Vec<Glyph>>, usize) {
 }
 
 /// The timeline, marking a moment of the replay instead of the current time if given.
-fn timeline_at(game: &Game, replay: Option<Replay>, lived: Option<(usize, usize)>) -> (Vec<Vec<Glyph>>, usize) {
-    let level = game.level();
-    let segments = game.segments();
-    let (mut lo, mut hi) = level.timeline();
-    for segment in segments {
+/// Ticks of context the scrolled timeline keeps ahead of and behind the current time.
+const SCROLL_MARGIN: i32 = 6;
+
+/// The global times the timeline of `game` covers: the level's own window and every segment, with
+/// a tick to spare on both sides.
+fn timeline_span(game: &Game) -> (i32, i32) {
+    let (mut lo, mut hi) = game.level().timeline();
+    for segment in game.segments() {
         let (a, b) = segment.span();
         lo = lo.min(a - 1);
         hi = hi.max(b + 1);
     }
+    (lo, hi)
+}
+
+/// The first global time to show when the timeline of `game` is wider than `width`, scrolled from
+/// `first` only as far as needed to keep `now` at least a margin away from either edge (like a
+/// text cursor), and never past either end.
+pub fn scroll_timeline(game: &Game, first: i32, now: i32, width: usize) -> i32 {
+    let (lo, hi) = timeline_span(game);
+    let width = width.max(1) as i32;
+    if hi - lo < width {
+        return lo;
+    }
+    let margin = SCROLL_MARGIN.min((width - 1) / 2);
+    let first = first.max(now + margin - (width - 1)).min(now - margin);
+    first.clamp(lo, hi - width + 1)
+}
+
+fn timeline_at(game: &Game, replay: Option<Replay>, lived: Option<(usize, usize)>) -> (Vec<Vec<Glyph>>, usize) {
+    timeline_window(game, replay, lived, None)
+}
+
+/// The timeline, cut to `window` (the first global time and a width) if it's wider than that,
+/// with `‹` and `›` where lanes go on past the edges.
+fn timeline_window(
+    game: &Game,
+    replay: Option<Replay>,
+    lived: Option<(usize, usize)>,
+    window: Option<(i32, usize)>,
+) -> (Vec<Vec<Glyph>>, usize) {
+    let level = game.level();
+    let segments = game.segments();
+    let (lo, hi) = timeline_span(game);
     let width = (hi - lo + 1) as usize;
     let col = |t: i32| (t - lo) as usize;
+    // The part showing: everything, or the window.
+    let (first, shown) = match window {
+        Some((first, w)) if w < width => (first.clamp(lo, hi - w as i32 + 1), w),
+        _ => (lo, width),
+    };
+    let last = first + shown as i32 - 1;
     let ticks: Vec<i32> = (lo..=hi).filter(|t| t.rem_euclid(5) == 0).collect();
     let (now, controlled) = match replay {
         Some(r) => (r.t, r.controlled),
@@ -384,6 +433,9 @@ fn timeline_at(game: &Game, replay: Option<Replay>, lived: Option<(usize, usize)
         let span = col(t)..col(t) + label.len();
         if span.start <= now_span.end && now_span.start <= span.end {
             continue;
+        }
+        if t < first || t + label.len() as i32 - 1 > last {
+            continue; // cut by an edge
         }
         for (i, ch) in label.chars().enumerate() {
             if let Some(cell) = labels.get_mut(span.start + i) {
@@ -451,10 +503,39 @@ fn timeline_at(game: &Game, replay: Option<Replay>, lived: Option<(usize, usize)
         }
         rows.push(lane);
     }
-    (rows, width)
+    if shown == width {
+        return (rows, width);
+    }
+    // Cut to the window; the current-time label may still hang past its right edge.
+    let (start, end) = (col(first), col(last) + 1);
+    let mut out: Vec<Vec<Glyph>> = rows
+        .into_iter()
+        .enumerate()
+        .map(|(i, row)| {
+            let keep = if i == 0 { end.max(now_span.end.min(row.len())) } else { end };
+            row.get(start..keep.min(row.len())).map_or_else(Vec::new, <[Glyph]>::to_vec)
+        })
+        .collect();
+    let more = Glyph::new('‹', Color::Hint);
+    let edge = |row: &mut Vec<Glyph>, at: usize, glyph: Glyph| {
+        if let Some(cell) = row.get_mut(at) {
+            *cell = glyph;
+        }
+    };
+    // Only lanes that go on past an edge say so; the axis goes on anyway.
+    for (i, row) in out.iter_mut().enumerate().skip(2) {
+        let (a, b) = segments[i - 2].span();
+        if a < first {
+            edge(row, 0, more);
+        }
+        if b > last {
+            edge(row, shown - 1, Glyph::new('›', Color::Hint));
+        }
+    }
+    (out, shown)
 }
 
-/// A moment of the replay after winning.
+/// A moment of the tape to show the history from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Replay {
     pub t: i32,
@@ -482,6 +563,8 @@ pub struct Extras<'a> {
     pub lived: Option<(usize, usize)>,
     /// The universe collapsing after a paradox: how far along (cells dissolve as it grows).
     pub collapse: Option<u32>,
+    /// Scroll the timeline, if it's wider than the board, to start at this global time.
+    pub scroll: Option<i32>,
 }
 
 /// The legend for the map: what its symbols mean, in two columns, each symbol in its real colors.
@@ -586,10 +669,33 @@ pub fn screen_with(game: &Game, playing: &[Hint], exited: &[Hint], extras: &Extr
     let board = render_frame(game, extras);
     let board_width = board.first().map_or(0, Vec::len);
     let (timeline, timeline_width) =
-        if extras.legend { legend(&board) } else { timeline_at(game, extras.replay, extras.lived) };
+        if extras.legend {
+            legend(&board)
+        } else {
+            timeline_window(game, extras.replay, extras.lived, extras.scroll.map(|first| (first, board_width)))
+        };
     let status = status_line(game, playing, exited, extras.par);
     let title = extras.title.map_or_else(crate::title::logo, <[Vec<Glyph>]>::to_vec);
-    Screen { title, board, board_width, timeline, timeline_width, status }
+    Screen { title, board, board_width, timeline, timeline_width, status, targets: Vec::new(), hover: None }
+}
+
+/// A part of the screen that takes pointer gestures.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Region {
+    Board,
+    Timeline,
+    /// One of the status line's [`Screen::targets`].
+    Toolbar { target: usize, input: Input },
+}
+
+/// Vertical positions of the screen's parts, and the status reflowed to fit.
+struct Rows {
+    /// Status lines, as where each cell comes from (see [`wrap_indices`]).
+    status: Vec<Vec<Slot>>,
+    title_y: usize,
+    middle_y: usize,
+    timeline_y: usize,
+    status_y: usize,
 }
 
 /// A row of glyphs placed at a cell position on a screen.
@@ -603,34 +709,60 @@ pub struct Placement {
 /// ` · `-separated items (dropping the separator at each break), and inside an item only if it
 /// alone is too wide.
 pub fn wrap_status(status: &[Glyph], width: usize) -> Vec<Vec<Glyph>> {
-    let width = width.max(1);
-    let mut items: Vec<&[Glyph]> = Vec::new();
+    wrap_indices(status, width).into_iter().map(|line| line.iter().map(|slot| slot.glyph(status)).collect()).collect()
+}
+
+/// A cell of a reflowed status line: a glyph of the status, or glyph `k` of a separator put
+/// between items that share a line.
+#[derive(Clone, Copy, Debug)]
+enum Slot {
+    Status(usize),
+    Separator(usize),
+}
+
+impl Slot {
+    fn glyph(self, status: &[Glyph]) -> Glyph {
+        match self {
+            Slot::Status(i) => status[i],
+            Slot::Separator(k) => Glyph::plain([' ', '·', ' '][k], Some(Color::Hint)),
+        }
+    }
+}
+
+/// The ` · `-separated items of a status line, as ranges of it.
+fn status_items(status: &[Glyph]) -> Vec<std::ops::Range<usize>> {
+    let mut items = Vec::new();
     let mut start = 0;
     let mut i = 0;
     while i + 2 < status.len() {
         if status[i].ch == ' ' && status[i + 1].ch == '·' && status[i + 2].ch == ' ' {
-            items.push(&status[start..i]);
+            items.push(start..i);
             start = i + 3;
             i += 3;
         } else {
             i += 1;
         }
     }
-    items.push(&status[start..]);
+    items.push(start..status.len());
+    items
+}
 
-    let separator = text(" · ", Some(Color::Hint));
-    let mut lines: Vec<Vec<Glyph>> = Vec::new();
-    let mut line: Vec<Glyph> = Vec::new();
-    for item in items {
-        if !line.is_empty() && line.len() + separator.len() + item.len() <= width {
-            line.extend_from_slice(&separator);
-            line.extend_from_slice(item);
+/// [`wrap_status`] as slots: where each cell of each line comes from.
+fn wrap_indices(status: &[Glyph], width: usize) -> Vec<Vec<Slot>> {
+    let width = width.max(1);
+    let mut lines: Vec<Vec<Slot>> = Vec::new();
+    let mut line: Vec<Slot> = Vec::new();
+    for item in status_items(status) {
+        if !line.is_empty() && line.len() + 3 + item.len() <= width {
+            line.extend((0..3).map(Slot::Separator));
+            line.extend(item.map(Slot::Status));
             continue;
         }
         if !line.is_empty() {
             lines.push(std::mem::take(&mut line));
         }
-        for chunk in item.chunks(width) {
+        let indices: Vec<Slot> = item.map(Slot::Status).collect();
+        for chunk in indices.chunks(width) {
             if line.len() == width || (!line.is_empty() && chunk.len() == width) {
                 lines.push(std::mem::take(&mut line));
             }
@@ -641,6 +773,51 @@ pub fn wrap_status(status: &[Glyph], width: usize) -> Vec<Vec<Glyph>> {
         lines.push(line);
     }
     lines
+}
+
+/// A clickable part of the status line: glyphs `range` of it, standing for `input`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Target {
+    pub range: std::ops::Range<usize>,
+    pub input: Input,
+}
+
+/// The clickable targets of a status line that shows hints from `lists`: every key of a hint
+/// (`j`, `↑`, `w`, `esc`) on its own, or the whole hint, label included, if all its keys do the
+/// same thing (`r restart`).
+pub fn toolbar_targets(status: &[Glyph], lists: &[&[Hint]]) -> Vec<Target> {
+    let mut targets = Vec::new();
+    for item in status_items(status) {
+        let shown: String = status[item.clone()].iter().map(|g| g.ch).collect();
+        let Some((keys, _)) = lists.iter().flat_map(|l| l.iter()).find(|(keys, label)| format!("{keys} {label}") == shown)
+        else {
+            continue;
+        };
+        let mut keyed = Vec::new();
+        let mut at = item.start;
+        for token in keys.split(' ') {
+            let len = token.chars().count();
+            match crate::session::key_input(token) {
+                Some(input) => keyed.push(Target { range: at..at + len, input }),
+                None => {
+                    // A run of keys ("wasd"), each its own target, unless it's a word ("swipe").
+                    let each: Option<Vec<Input>> =
+                        token.chars().map(|ch| crate::session::key_input(ch.encode_utf8(&mut [0; 4]))).collect();
+                    for (k, input) in each.into_iter().flatten().enumerate() {
+                        keyed.push(Target { range: at + k..at + k + 1, input });
+                    }
+                }
+            }
+            at += len + 1;
+        }
+        match keyed.first() {
+            Some(first) if keyed.iter().all(|t| t.input == first.input) => {
+                targets.push(Target { range: item, input: first.input });
+            }
+            _ => targets.extend(keyed),
+        }
+    }
+    targets
 }
 
 impl Screen {
@@ -674,7 +851,38 @@ impl Screen {
     /// the top, status at the bottom, board and timeline centered in between, each centered
     /// horizontally. Rows may extend past the right edge; a front end clips them.
     pub fn layout(&self, cols: usize, rows: usize) -> Vec<Placement> {
-        let status = wrap_status(&self.status, cols.saturating_sub(2));
+        let Rows { status, title_y, middle_y, timeline_y, status_y } = self.rows(cols, rows);
+        let centered = |w: usize| cols.saturating_sub(w) / 2;
+
+        let mut placed = Vec::new();
+        for (i, row) in self.title.iter().enumerate() {
+            placed.push(Placement { x: centered(self.title_width()), y: title_y + i, row: row.clone() });
+        }
+        for (i, row) in self.board.iter().enumerate() {
+            placed.push(Placement { x: centered(self.board_width), y: middle_y + i, row: row.clone() });
+        }
+        for (i, row) in self.timeline.iter().enumerate() {
+            placed.push(Placement { x: centered(self.timeline_width), y: timeline_y + i, row: row.clone() });
+        }
+        let hovered = self.hover.and_then(|i| self.targets.get(i)).map(|t| t.range.clone());
+        for (i, line) in status.into_iter().enumerate() {
+            let row: Vec<Glyph> = line
+                .iter()
+                .map(|&slot| match slot {
+                    Slot::Status(i) if hovered.as_ref().is_some_and(|r| r.contains(&i)) => {
+                        Glyph { bg: Some(Color::Hover), ..self.status[i] }
+                    }
+                    slot => slot.glyph(&self.status),
+                })
+                .collect();
+            placed.push(Placement { x: centered(row.len()), y: status_y + i, row });
+        }
+        placed
+    }
+
+    /// Where each part goes vertically on a `cols` × `rows` grid (see [`Screen::layout`]).
+    fn rows(&self, cols: usize, rows: usize) -> Rows {
+        let status = wrap_indices(&self.status, cols.saturating_sub(2));
         let (title_h, middle_h) = (self.title.len(), self.middle_height());
         let needed = 1 + title_h + 1 + middle_h + 1 + status.len() + 1;
         let (title_y, status_y) = if rows >= needed {
@@ -688,22 +896,33 @@ impl Screen {
             (rows.saturating_sub(middle_h) / 2).clamp(lo, hi)
         };
         let timeline_y = middle_y + self.board.len() + 1;
-        let centered = |w: usize| cols.saturating_sub(w) / 2;
+        Rows { status, title_y, middle_y, timeline_y, status_y }
+    }
 
-        let mut placed = Vec::new();
-        for (i, row) in self.title.iter().enumerate() {
-            placed.push(Placement { x: centered(self.title_width()), y: title_y + i, row: row.clone() });
+    /// Which part of the screen laid out on a `cols` × `rows` grid is at cell (`x`, `y`)
+    /// (fractions allowed): the board or the timeline, each including its row's width.
+    pub fn region_at(&self, cols: usize, rows: usize, x: f32, y: f32) -> Option<Region> {
+        let layout = self.rows(cols, rows);
+        let within = |top: usize, height: usize, width: usize| {
+            let left = cols.saturating_sub(width) / 2;
+            (top as f32..(top + height) as f32).contains(&y) && (left as f32..(left + width) as f32).contains(&x)
+        };
+        if let Some(line) = (y >= 0.0).then(|| (y as usize).checked_sub(layout.status_y)).flatten().and_then(|i| layout.status.get(i)) {
+            let left = cols.saturating_sub(line.len()) / 2;
+            let Some(Slot::Status(index)) = (x >= left as f32).then(|| line.get(x as usize - left)).flatten().copied()
+            else {
+                return None;
+            };
+            let target = self.targets.iter().position(|t| t.range.contains(&index))?;
+            return Some(Region::Toolbar { target, input: self.targets[target].input });
         }
-        for (i, row) in self.board.iter().enumerate() {
-            placed.push(Placement { x: centered(self.board_width), y: middle_y + i, row: row.clone() });
+        if within(layout.middle_y, self.board.len(), self.board_width) {
+            Some(Region::Board)
+        } else if !self.timeline.is_empty() && within(layout.timeline_y, self.timeline.len(), self.timeline_width) {
+            Some(Region::Timeline)
+        } else {
+            None
         }
-        for (i, row) in self.timeline.iter().enumerate() {
-            placed.push(Placement { x: centered(self.timeline_width), y: timeline_y + i, row: row.clone() });
-        }
-        for (i, row) in status.into_iter().enumerate() {
-            placed.push(Placement { x: centered(row.len()), y: status_y + i, row });
-        }
-        placed
     }
 
     /// The laid-out screen as a full `cols` × `rows` grid of glyphs, clipped at the edges.

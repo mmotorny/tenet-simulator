@@ -17,11 +17,13 @@ use std::io::{self, Write};
 use std::process::ExitCode;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use crossterm::{cursor, execute, queue, terminal};
 use tenet_core::game::{Dir, Status};
 use tenet_core::level::Level;
-use tenet_core::session::{Input, Session};
+use tenet_core::session::{Input, Pointer, Session};
 use tenet_core::view::{self, Glyph};
 
 const DEFAULT_LEVEL: &str = tenet_core::levels::FREEPORT;
@@ -81,11 +83,11 @@ fn paint(out: &mut String, text: &str, glyph: &Glyph, enabled: bool) {
 }
 
 const PLAYING_HINTS: &[view::Hint] =
-    &[("←↑↓→ wasd", "move"), ("u", "undo"), ("r", "restart"), ("?", "legend"), ("q esc", "quit")];
+    &[("←↑↓→ wasd", "move"), ("j k l , .", "tape"), ("r", "restart"), ("?", "legend"), ("q esc", "quit")];
 const EXITED_HINTS: &[view::Hint] =
-    &[("j", "rewind"), ("k", "pause"), ("l", "play"), (", .", "step"), ("u", "undo"), ("r", "restart"), ("?", "legend"), ("q esc", "quit")];
+    &[("j", "rewind"), ("k", "pause"), ("l", "play"), (", .", "step"), ("r", "restart"), ("?", "legend"), ("q esc", "quit")];
 
-const PARADOX_HINTS: &[view::Hint] = &[("u", "undo"), ("r", "restart"), ("q esc", "quit")];
+const PARADOX_HINTS: &[view::Hint] = &[(", j", "rewind"), ("r", "restart"), ("q esc", "quit")];
 
 fn screen(session: &Session) -> view::Screen {
     session.screen(PLAYING_HINTS, EXITED_HINTS, PARADOX_HINTS)
@@ -186,14 +188,14 @@ struct TerminalGuard;
 impl TerminalGuard {
     fn enter() -> io::Result<Self> {
         terminal::enable_raw_mode()?;
-        execute!(io::stdout(), terminal::EnterAlternateScreen, cursor::Hide)?;
+        execute!(io::stdout(), terminal::EnterAlternateScreen, cursor::Hide, event::EnableMouseCapture)?;
         Ok(Self)
     }
 }
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
-        let _ = execute!(io::stdout(), cursor::Show, terminal::LeaveAlternateScreen);
+        let _ = execute!(io::stdout(), event::DisableMouseCapture, cursor::Show, terminal::LeaveAlternateScreen);
         let _ = terminal::disable_raw_mode();
     }
 }
@@ -216,53 +218,71 @@ fn draw(session: &Session, color: bool) -> io::Result<()> {
 /// The input a key stands for. Movement keys only ever move the protagonist and the tape's
 /// transport keys (as in YouTube and video editors) only ever control the tape: no modes.
 fn input_for(code: KeyCode) -> Option<Input> {
-    Some(match code {
-        KeyCode::Up => Input::Move(Dir::North),
-        KeyCode::Down => Input::Move(Dir::South),
-        KeyCode::Right => Input::Move(Dir::East),
-        KeyCode::Left => Input::Move(Dir::West),
-        KeyCode::Char('u') => Input::Undo,
-        KeyCode::Char('r') => Input::Restart,
-        KeyCode::Char('j') => Input::Rewind,
-        KeyCode::Char('k') => Input::Pause,
-        KeyCode::Char('l') => Input::Play,
-        KeyCode::Char(' ') => Input::TogglePlay,
-        KeyCode::Char(',') => Input::StepBack,
-        KeyCode::Char('.') => Input::StepForward,
-        KeyCode::Char('?') => Input::ToggleLegend,
-        KeyCode::Char(ch) => Input::Move(dir_for_char(ch)?),
+    let key = match code {
+        KeyCode::Up => "↑".to_string(),
+        KeyCode::Down => "↓".to_string(),
+        KeyCode::Right => "→".to_string(),
+        KeyCode::Left => "←".to_string(),
+        KeyCode::Esc => "esc".to_string(),
+        KeyCode::Char(ch) => ch.to_lowercase().to_string(),
         _ => return None,
-    })
+    };
+    tenet_core::session::key_input(&key)
+}
+
+/// The pointer event a mouse event stands for, if any: the mouse scrolls the tape with the
+/// wheel, and hovers and clicks the toolbar.
+fn pointer_for(session: &Session, mouse: MouseEvent) -> io::Result<Option<Pointer>> {
+    let region = || -> io::Result<_> {
+        let (cols, rows) = terminal::size()?;
+        let (x, y) = (mouse.column as f32 + 0.5, mouse.row as f32 + 0.5);
+        Ok(screen(session).region_at(cols as usize, rows as usize, x, y))
+    };
+    Ok(Some(match mouse.kind {
+        MouseEventKind::ScrollDown | MouseEventKind::ScrollRight => Pointer::Wheel { notches: 1.0 },
+        MouseEventKind::ScrollUp | MouseEventKind::ScrollLeft => Pointer::Wheel { notches: -1.0 },
+        MouseEventKind::Moved => Pointer::Hover { region: region()? },
+        MouseEventKind::Down(MouseButton::Left) => Pointer::Click { region: region()? },
+        _ => return Ok(None),
+    }))
 }
 
 fn run_interactive(mut session: Session, color: bool) -> io::Result<()> {
-    {
-        let _guard = TerminalGuard::enter()?;
-        loop {
-            draw(&session, color)?;
-            // Animations and the playing tape move on by themselves when no key arrives in time.
-            if let Some(ms) = session.next_deadline() {
-                if !event::poll(Duration::from_millis(ms.into()))? {
-                    session.advance();
-                    continue;
-                }
+    let _guard = TerminalGuard::enter()?;
+    loop {
+        draw(&session, color)?;
+        // Animations and the playing tape move on by themselves when no key arrives in time.
+        if let Some(ms) = session.next_deadline() {
+            if !event::poll(Duration::from_millis(ms.into()))? {
+                session.advance();
+                continue;
             }
-            let Event::Key(KeyEvent { code, modifiers, kind: KeyEventKind::Press, .. }) = event::read()? else {
-                continue; // resize and other events just trigger a redraw
-            };
-            match code {
-                KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => break,
-                KeyCode::Char('q') | KeyCode::Esc => break,
-                code => {
-                    if let Some(input) = input_for(code) {
-                        session.input(input);
-                    }
+        }
+        let event = event::read()?;
+        if let Event::Mouse(mouse) = event {
+            if let Some(pointer) = pointer_for(&session, mouse)? {
+                session.pointer(pointer);
+            }
+            if session.quitting() {
+                break;
+            }
+            continue;
+        }
+        let Event::Key(KeyEvent { code, modifiers, kind: KeyEventKind::Press, .. }) = event else {
+            continue; // resize and other events just trigger a redraw
+        };
+        match code {
+            KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => break,
+            code => {
+                if let Some(input) = input_for(code) {
+                    session.input(input);
+                }
+                if session.quitting() {
+                    break;
                 }
             }
         }
     }
-    // Leave the final frame on the normal screen.
-    println!("{}", stacked_text(&session, false, color));
     Ok(())
 }
 

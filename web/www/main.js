@@ -8,16 +8,15 @@
 import init, { WebGame } from "./pkg/tenet_web.js";
 
 // Movement keys only ever move; the tape's transport keys (as in YouTube and video editors) only
-// ever control the tape after winning.
+// ever control the tape.
 const KEYS = {
   ArrowUp: "north", w: "north",
   ArrowDown: "south", s: "south",
   ArrowRight: "east", d: "east",
   ArrowLeft: "west", a: "west",
-  u: "undo", r: "restart", "?": "legend",
+  r: "restart", "?": "legend",
   j: "rewind", k: "pause", l: "play", " ": "toggle", ",": "back", ".": "forward",
 };
-const SWIPE_MIN_PX = 24;
 
 const canvas = document.getElementById("screen");
 
@@ -61,26 +60,40 @@ async function main() {
     }
   });
 
-  // Touch: a swipe anywhere acts like a cursor key. After winning there is nothing to move, so a
-  // tap plays or pauses the tape and a horizontal swipe steps it.
-  let touchStart = null;
-  document.addEventListener("touchstart", (e) => {
-    touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-  }, { passive: true });
-  document.addEventListener("touchend", (e) => {
-    if (!touchStart) return;
-    const dx = e.changedTouches[0].clientX - touchStart.x;
-    const dy = e.changedTouches[0].clientY - touchStart.y;
-    touchStart = null;
-    const tap = Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE_MIN_PX;
-    if (game.exited()) {
-      if (tap) input("toggle");
-      else if (Math.abs(dx) > Math.abs(dy)) input(dx > 0 ? "forward" : "back");
-    } else if (!tap) {
-      if (Math.abs(dx) > Math.abs(dy)) input(dx > 0 ? "east" : "west");
-      else input(dy > 0 ? "south" : "north");
-    }
+  // Touch: the game decides what a gesture means (swipe the board to move, swipe the timeline
+  // to scroll through the tape). Gestures elsewhere are the page's, so pulling down still
+  // reloads it. Tapping the toolbar presses what's tapped.
+  const touch = (kind) => (e) => {
+    const t = e.changedTouches[0];
+    const ours = game.touch(kind, t.clientX, t.clientY, e.timeStamp);
+    if (ours && e.cancelable) e.preventDefault();
+    draw();
+    schedule();
+  };
+  canvas.addEventListener("touchstart", touch("down"), { passive: false });
+  canvas.addEventListener("touchmove", touch("move"), { passive: false });
+  canvas.addEventListener("touchend", touch("up"), { passive: false });
+  // The mouse lights up and clicks the toolbar.
+  const mouse = (kind) => (e) => {
+    const over = game.mouse(kind, e.clientX, e.clientY);
+    canvas.style.cursor = over ? "pointer" : "";
+    draw();
+    schedule();
+  };
+  canvas.addEventListener("mousemove", mouse("move"));
+  canvas.addEventListener("mouseleave", mouse("leave"));
+  canvas.addEventListener("mousedown", (e) => {
+    if (e.button === 0) mouse("click")(e);
   });
+  // A notch is about 100 pixels or 3 lines, whichever the wheel reports.
+  const NOTCH = [100, 3, 1];
+  canvas.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+    game.wheel(delta / NOTCH[e.deltaMode]);
+    draw();
+    schedule();
+  }, { passive: false });
 
   // A canvas doesn't reflow by itself: redraw on resize and zoom, and once web fonts arrive.
   window.addEventListener("resize", draw);

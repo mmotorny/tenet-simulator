@@ -9,9 +9,9 @@ body {
   height: 100%;
   background: #000;
   overflow: hidden;
-  /* The whole screen is a swipe surface: no scrolling, zooming or pull-to-refresh. */
-  touch-action: none;
-  overscroll-behavior: none;
+  /* The game takes gestures on the board and the timeline (see main.js); elsewhere the browser
+     keeps its own, such as pull-to-refresh. No double-tap zoom. */
+  touch-action: manipulation;
 }
 
 #screen {

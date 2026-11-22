@@ -18,16 +18,17 @@
 - Look at results yourself before reporting: tmux for the terminal, headless Chrome screenshots for the web and SVGs.
 - Use a fresh `--user-data-dir` for every headless Chrome screenshot; a cached stylesheet once hid a regression.
 - Headless Chrome's virtual time doesn't advance CSS animations inside `<img>`; to check an animated SVG, inline it and seek with `document.getAnimations()`.
-- tmux captures can catch a frame mid-redraw; confirm suspicious frames deterministically in code.
+- tmux captures can catch a frame mid-redraw, and seeking an inlined animated SVG can show two frames at once; confirm suspicious frames deterministically (in code, or from the SVG's keyframes).
 
 ## Design constraints
 
-- Paradoxes: don't add special-case detection, verification or resolution logic around the prediction. The user decides how each paradox should resolve as they encounter it.
+- Paradoxes: don't add special-case detection, verification or resolution logic around the prediction. The user decides how each paradox should resolve as they encounter it. Standing on a trapdoor is never illegal (it may call for another self).
+- The solver's search is bounded by a fixed move budget, honestly reported as "within N moves". Don't add search bounds (time windows and the like) without a proof that they're safe.
 - The web page is a terminal emulator: exactly the terminal's screen, one cell per glyph. No web-only decoration; any decoration is textual and shared.
 - One colorless Unicode glyph per cell (no emoji). Braille only for in-cell graphics, never as a dot-matrix surface.
 - Red and blue mean the arrow of time (forward, inverted) and nothing else. The one sanctioned exception: the strong determinism reveal animates its letters red from the start and blue from the end, meeting in the middle.
 - Plain text must keep every meaning: when color carries meaning, add a glyph swap in `view::monochrome`.
-- Rejected, don't re-propose: dashed glass (`╎ ┊ ¦`); glass as a thin wall between cells; glass inside the turnstile; a turnstile in the outer wall; a partial glass wall; thin line-art or 5-row block logos; light lines on the logo slab; walls around start/finish; start/finish inside doorways; `hjkl` for movement; strikethrough for a missed par; a wall flash on winning; a double logo turn for the bonus; selves stuck on start/finish outside their worldline.
+- Rejected, don't re-propose: dashed glass (`╎ ┊ ¦`); glass as a thin wall between cells; glass inside the turnstile; a turnstile in the outer wall; a partial glass wall; thin line-art or 5-row block logos; light lines on the logo slab; walls around start/finish; start/finish inside doorways; `hjkl` for movement; strikethrough for a missed par; a wall flash on winning; a double logo turn for the bonus; selves stuck on start/finish outside their worldline; `u` undo (the tape replaces it); rewinding to the history as predicted back then (the committed tape stays); a restart that keeps the tape; tapping the timeline; dragging with the mouse (it only wheels and clicks the hint bar); `‹ ›` on the time axis.
 
 ## Repository conventions
 

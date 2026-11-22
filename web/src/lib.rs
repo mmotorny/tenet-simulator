@@ -4,21 +4,24 @@
 //! WebAssembly bindings: the page drives the game through [`WebGame`], which draws the screen onto
 //! a canvas the way a terminal emulator draws its cell buffer.
 
-use tenet_core::game::{Dir, Status};
+use std::cell::Cell;
+
+use tenet_core::game::Dir;
 use tenet_core::level::Level;
 use tenet_core::levels;
 use tenet_core::paint::{paint, Metrics, Shape};
-use tenet_core::session::{Input, Session};
+use tenet_core::session::{Input, Pointer, Session};
 use tenet_core::view;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
-const PLAYING_HINTS: &[view::Hint] = &[("←↑↓→ wasd swipe", "move"), ("u", "undo"), ("r", "restart"), ("?", "legend")];
+const PLAYING_HINTS: &[view::Hint] =
+    &[("←↑↓→ wasd swipe", "move"), ("j k l , .", "tape"), ("r", "restart"), ("?", "legend")];
 const EXITED_HINTS: &[view::Hint] =
-    &[("j", "rewind"), ("k", "pause"), ("l", "play"), (", .", "step"), ("u", "undo"), ("r", "restart"), ("?", "legend")];
+    &[("j", "rewind"), ("k", "pause"), ("l", "play"), (", .", "step"), ("r", "restart"), ("?", "legend")];
 
-const PARADOX_HINTS: &[view::Hint] = &[("u", "undo"), ("r", "restart")];
+const PARADOX_HINTS: &[view::Hint] = &[(", j", "rewind"), ("r", "restart")];
 
 /// JetBrains Mono (loaded by the page), then the GitHub monospace stack as fallback.
 const FONT_FAMILY: &str =
@@ -33,6 +36,8 @@ const BACKGROUND: &str = "#000";
 #[wasm_bindgen]
 pub struct WebGame {
     session: Session,
+    /// The grid of the last render, to map pointer positions to cells.
+    grid: Cell<Option<Grid>>,
 }
 
 #[wasm_bindgen]
@@ -41,18 +46,17 @@ impl WebGame {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Result<WebGame, JsError> {
         let level = Level::parse(levels::FREEPORT).map_err(|e| JsError::new(&e.to_string()))?;
-        Ok(Self { session: Session::new(level) })
+        Ok(Self { session: Session::new(level), grid: Cell::new(None) })
     }
 
-    /// Feeds an input: "north", "south", "east", "west", "undo", "restart", "legend", or one of
-    /// the tape's "rewind", "pause", "play", "toggle", "back" and "forward" (after winning).
+    /// Feeds an input: "north", "south", "east", "west", "restart", "legend", or one of the
+    /// tape's "rewind", "pause", "play", "toggle", "back" and "forward".
     pub fn input(&mut self, name: &str) -> Result<(), JsError> {
         let input = match name {
             "north" => Input::Move(Dir::North),
             "south" => Input::Move(Dir::South),
             "east" => Input::Move(Dir::East),
             "west" => Input::Move(Dir::West),
-            "undo" => Input::Undo,
             "restart" => Input::Restart,
             "rewind" => Input::Rewind,
             "pause" => Input::Pause,
@@ -78,9 +82,52 @@ impl WebGame {
         self.session.advance();
     }
 
-    /// Whether the level is over (the tape controls apply).
-    pub fn exited(&self) -> bool {
-        self.session.game().status() == Status::Exited
+    /// Feeds a mouse event ("move", "leave" or "click") at a position in CSS pixels on the canvas;
+    /// returns whether the mouse is over something clickable (for the cursor).
+    pub fn mouse(&mut self, kind: &str, css_x: f64, css_y: f64) -> Result<bool, JsError> {
+        let region = match self.cell(css_x, css_y) {
+            Some((grid, x, y)) if kind != "leave" => {
+                self.session.screen(PLAYING_HINTS, EXITED_HINTS, PARADOX_HINTS).region_at(grid.cols, grid.rows, x, y)
+            }
+            _ => None,
+        };
+        let event = match kind {
+            "move" | "leave" => Pointer::Hover { region },
+            "click" => Pointer::Click { region },
+            _ => return Err(JsError::new(&format!("unknown mouse event {kind:?}"))),
+        };
+        self.session.pointer(event);
+        Ok(matches!(region, Some(view::Region::Toolbar { .. })))
+    }
+
+    /// The grid of the last render and a position in CSS pixels on the canvas, in its cells.
+    fn cell(&self, css_x: f64, css_y: f64) -> Option<(Grid, f32, f32)> {
+        let grid = self.grid.get()?;
+        let x = ((css_x * grid.dpr - grid.ox as f64) / grid.cell_w) as f32;
+        let y = ((css_y * grid.dpr - grid.oy as f64) / grid.cell_h) as f32;
+        Some((grid, x, y))
+    }
+
+    /// Feeds a touch event ("down", "move" or "up") at a position in CSS pixels on the canvas and
+    /// a time in milliseconds; returns whether it belongs to a gesture of the game's (so the page
+    /// shouldn't also scroll).
+    pub fn touch(&mut self, kind: &str, css_x: f64, css_y: f64, ms: f64) -> Result<bool, JsError> {
+        let Some((grid, x, y)) = self.cell(css_x, css_y) else { return Ok(false) };
+        let event = match kind {
+            "down" => {
+                let screen = self.session.screen(PLAYING_HINTS, EXITED_HINTS, PARADOX_HINTS);
+                Pointer::Down { x, y, ms, region: screen.region_at(grid.cols, grid.rows, x, y) }
+            }
+            "move" => Pointer::Move { x, y, ms },
+            "up" => Pointer::Up { x, y, ms },
+            _ => return Err(JsError::new(&format!("unknown pointer event {kind:?}"))),
+        };
+        Ok(self.session.pointer(event))
+    }
+
+    /// Feeds a wheel turn, in notches (positive for down or right): it scrolls the tape.
+    pub fn wheel(&mut self, notches: f64) {
+        self.session.pointer(Pointer::Wheel { notches: notches as f32 });
     }
 
     /// Draws the screen onto `canvas`, filling its CSS size at the device's pixel density.
@@ -100,6 +147,7 @@ impl WebGame {
         let screen = self.session.screen(PLAYING_HINTS, EXITED_HINTS, PARADOX_HINTS);
         let grid = Grid::fit(css_w, css_h, dpr, advance, screen.min_size());
         let cells = screen.grid(grid.cols, grid.rows);
+        self.grid.set(Some(grid));
 
         ctx.set_fill_style_str(BACKGROUND);
         ctx.fill_rect(0.0, 0.0, px_w as f64, px_h as f64);
@@ -147,7 +195,7 @@ fn css((r, g, b): (u8, u8, u8)) -> String {
 
 /// The cell grid for a canvas: font size, whole-device-pixel cell size, grid size, and the
 /// offset that centres the grid on the canvas.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct Grid {
     font_px: f64,
     cell_w: f64,
@@ -204,11 +252,10 @@ mod tests {
             let name = if ch == 'w' { "north" } else { "east" };
             game.input(name).unwrap();
         }
-        assert!(game.exited());
         game.input("pause").unwrap(); // skips the celebration; the tape is paused
         assert_eq!(game.next_deadline(), -1);
-        game.input("undo").unwrap();
-        assert!(!game.exited());
+        game.input("back").unwrap();
+        game.input("east").unwrap(); // moving again from a moment before the finish
     }
 
     #[test]
