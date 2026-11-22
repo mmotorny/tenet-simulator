@@ -24,6 +24,23 @@ pub enum Color {
     Key,
     /// The action a hint describes, and the separators between hints.
     Hint,
+    /// Neutral parts of the title logo.
+    Title,
+}
+
+impl Color {
+    /// The palette shared by every front end, as sRGB.
+    pub const fn rgb(self) -> (u8, u8, u8) {
+        match self {
+            Color::Red => (230, 70, 60),
+            Color::Blue => (70, 140, 235),
+            Color::Glass => (190, 205, 215),
+            Color::Wall => (140, 140, 140),
+            Color::Floor => (70, 70, 70),
+            Color::Door | Color::Key | Color::Title => (230, 230, 230),
+            Color::Hint => (110, 110, 110),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,7 +50,7 @@ pub struct Glyph {
 }
 
 impl Glyph {
-    const BLANK: Glyph = Glyph { ch: ' ', color: None };
+    pub const BLANK: Glyph = Glyph { ch: ' ', color: None };
 
     const fn new(ch: char, color: Color) -> Self {
         Self { ch, color: Some(color) }
@@ -188,16 +205,26 @@ fn hints(list: &[Hint]) -> Vec<Glyph> {
     out
 }
 
-/// The whole screen every front end shows: the map with the time label beside the exit row,
-/// a blank line, and a status line. `playing` hints are shown while playing; `exited` hints
-/// follow the message shown after leaving through the exit door.
-pub fn screen(game: &Game, playing: &[Hint], exited: &[Hint]) -> Vec<Vec<Glyph>> {
-    let mut rows = render(game);
+/// Everything a front end lays out: the title at the top, the board in the middle, and the
+/// status line (hint bar) at the bottom.
+pub struct Screen {
+    pub title: Vec<Vec<Glyph>>,
+    /// The map, with the time label to the right of the exit row.
+    pub board: Vec<Vec<Glyph>>,
+    /// Width of the map alone. Front ends center the board on this, so the label hangs outside.
+    pub board_width: usize,
+    pub status: Vec<Glyph>,
+}
+
+/// Builds the screen. `playing` hints are shown while playing; `exited` hints follow the message
+/// shown after leaving through the exit door.
+pub fn screen(game: &Game, playing: &[Hint], exited: &[Hint]) -> Screen {
+    let mut board = render(game);
+    let board_width = board.first().map_or(0, Vec::len);
     let label_row = game.level().exit().y as usize;
-    rows[label_row].extend(text("    ", None));
-    rows[label_row].extend(text(&format!("t = {} ▲", game.turn()), Some(Color::Red)));
-    rows.push(Vec::new());
-    rows.push(match game.status() {
+    board[label_row].extend(text("    ", None));
+    board[label_row].extend(text(&format!("t = {} ▲", game.turn()), Some(Color::Red)));
+    let status = match game.status() {
         Status::Playing => hints(playing),
         Status::Exited => {
             let mut line = text(&format!("You walked out of the exit door in {} moves.", game.turn()), None);
@@ -207,8 +234,88 @@ pub fn screen(game: &Game, playing: &[Hint], exited: &[Hint]) -> Vec<Vec<Glyph>>
             }
             line
         }
-    });
-    rows
+    };
+    Screen { title: crate::title::logo(), board, board_width, status }
+}
+
+impl Screen {
+    /// The screen as one centered column: title (optional), board, status, separated by blank
+    /// lines. Used where there is no fixed-size screen to lay out on, such as scripted output.
+    pub fn stacked(&self, with_title: bool) -> Vec<Vec<Glyph>> {
+        let title_width = if with_title { self.title.first().map_or(0, Vec::len) } else { 0 };
+        let width = title_width.max(self.board_width).max(self.status.len());
+        let pad = |w: usize, row: &[Glyph]| {
+            let mut out = vec![Glyph::BLANK; width.saturating_sub(w) / 2];
+            out.extend_from_slice(row);
+            out
+        };
+        let mut rows = Vec::new();
+        if with_title {
+            rows.extend(self.title.iter().map(|r| pad(title_width, r)));
+            rows.push(Vec::new());
+        }
+        rows.extend(self.board.iter().map(|r| pad(self.board_width, r)));
+        rows.push(Vec::new());
+        rows.push(pad(self.status.len(), &self.status));
+        rows
+    }
+}
+
+/// Renders rows as a standalone SVG image. Every glyph is placed at its exact grid position, so
+/// rows stay aligned whatever fonts the viewer substitutes (unlike text in a Markdown code block).
+pub fn to_svg(rows: &[Vec<Glyph>]) -> String {
+    const FONT: f32 = 14.0;
+    const CELL_W: f32 = FONT * 0.6;
+    const CELL_H: f32 = FONT * 1.25;
+    const PAD: f32 = 2.0 * CELL_W;
+    let cols = rows.iter().map(Vec::len).max().unwrap_or(0);
+    let width = cols as f32 * CELL_W + 2.0 * PAD;
+    let height = rows.len() as f32 * CELL_H + 2.0 * PAD;
+
+    let mut svg = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" \
+         viewBox=\"0 0 {width} {height}\" font-family=\"ui-monospace, SFMono-Regular, 'SF Mono', Menlo, \
+         Consolas, 'Liberation Mono', 'DejaVu Sans Mono', monospace\" font-size=\"{FONT}\" \
+         text-anchor=\"middle\">\n<rect width=\"100%\" height=\"100%\" rx=\"6\" fill=\"#000\"/>\n"
+    );
+    for (y, row) in rows.iter().enumerate() {
+        let baseline = PAD + y as f32 * CELL_H + CELL_H * 0.75;
+        for (x, glyph) in row.iter().enumerate() {
+            if glyph.ch == ' ' || glyph.ch == '\u{2800}' {
+                continue;
+            }
+            let (r, g, b) = glyph.color.map_or((200, 200, 200), Color::rgb);
+            let cx = PAD + (x as f32 + 0.5) * CELL_W;
+            // Diagonals as lines from corner to corner, so they join across rows like in a terminal.
+            if glyph.ch == '╲' || glyph.ch == '╱' {
+                let (left, right) = (cx - CELL_W / 2.0, cx + CELL_W / 2.0);
+                let (top, bottom) = (PAD + y as f32 * CELL_H, PAD + (y + 1) as f32 * CELL_H);
+                let (y1, y2) = if glyph.ch == '╲' { (top, bottom) } else { (bottom, top) };
+                svg.push_str(&format!(
+                    "<line x1=\"{left}\" y1=\"{y1}\" x2=\"{right}\" y2=\"{y2}\" \
+                     stroke=\"rgb({r},{g},{b})\" stroke-width=\"1.2\"/>\n"
+                ));
+                continue;
+            }
+            // Stretch line-drawing glyphs to exactly one cell so lines join across cells.
+            let stretch = if ('\u{2500}'..='\u{257F}').contains(&glyph.ch) {
+                format!(" textLength=\"{CELL_W}\" lengthAdjust=\"spacingAndGlyphs\"")
+            } else {
+                String::new()
+            };
+            let ch = match glyph.ch {
+                '<' => "&lt;".to_string(),
+                '>' => "&gt;".to_string(),
+                '&' => "&amp;".to_string(),
+                c => c.to_string(),
+            };
+            svg.push_str(&format!(
+                "<text x=\"{cx}\" y=\"{baseline}\" fill=\"rgb({r},{g},{b})\"{stretch}>{ch}</text>\n"
+            ));
+        }
+    }
+    svg.push_str("</svg>\n");
+    svg
 }
 
 /// The rendered view as plain text, one line per row.
@@ -241,12 +348,12 @@ mod tests {
     fn screen_adds_time_label_and_status() {
         let mut game = Game::new(Level::parse(crate::levels::FREEPORT).unwrap());
         let playing = [("←↑↓→ wasd", "move"), ("q", "quit")];
-        let rows = screen(&game, &playing, &[("r", "restart")]);
-        let text = to_plain_text(&rows);
-        let lines: Vec<&str> = text.lines().collect();
-        assert!(lines[2].ends_with("⠀    t = 0 ▲"));
-        assert_eq!(&lines[9..], ["", "←↑↓→ wasd move · q quit"]);
-        let colors: Vec<Option<Color>> = rows[10].iter().map(|g| g.color).collect();
+        let screen = screen(&game, &playing, &[("r", "restart")]);
+        assert_eq!(screen.board_width, 29);
+        let text = to_plain_text(&screen.board);
+        assert!(text.lines().nth(2).unwrap().ends_with("⠀    t = 0 ▲"));
+        assert_eq!(to_plain_text(std::slice::from_ref(&screen.status)), "←↑↓→ wasd move · q quit");
+        let colors: Vec<Option<Color>> = screen.status.iter().map(|g| g.color).collect();
         assert_eq!(colors[0], Some(Color::Key)); // ←
         assert_eq!(colors[4], None); // space between key groups
         assert_eq!(colors[10], Some(Color::Hint)); // "move"
@@ -255,8 +362,35 @@ mod tests {
         for dir in [[East; 4].as_slice(), &[North; 2], &[East; 9], &[North; 2], &[East]].concat() {
             game.step(dir);
         }
-        let text = to_plain_text(&screen(&game, &playing, &[("r", "restart")]));
-        assert!(text.ends_with("You walked out of the exit door in 18 moves. · r restart"));
+        let status = screen_status(&game, &playing, &[("r", "restart")]);
+        assert_eq!(status, "You walked out of the exit door in 18 moves. · r restart");
+    }
+
+    fn screen_status(game: &Game, playing: &[Hint], exited: &[Hint]) -> String {
+        to_plain_text(&[screen(game, playing, exited).status])
+    }
+
+    #[test]
+    fn stacked_centers_blocks_on_the_map() {
+        let game = Game::new(Level::parse(crate::levels::FREEPORT).unwrap());
+        let rows = screen(&game, &[("q", "quit")], &[]).stacked(true);
+        let text = to_plain_text(&rows);
+        let lines: Vec<&str> = text.lines().collect();
+        // Title (33 wide) is the widest block; the 29-wide map is indented by two, the label hangs.
+        assert!(lines[0].starts_with("╶─┬─╴"));
+        assert!(lines[6].starts_with("  ┏━━"));
+        assert!(lines[8].ends_with("⠀    t = 0 ▲"));
+        assert_eq!(lines.last().unwrap().trim(), "q quit");
+    }
+
+    #[test]
+    fn svg_places_every_visible_glyph() {
+        let rows = vec![text("┏━┓ a<╲", Some(Color::Wall))];
+        let svg = to_svg(&rows);
+        assert_eq!(svg.matches("<text ").count(), 5); // the space is skipped
+        assert_eq!(svg.matches("<line ").count(), 1); // the diagonal is drawn as a line
+        assert_eq!(svg.matches("textLength").count(), 3); // only box-drawing glyphs are stretched
+        assert!(svg.contains("&lt;"));
     }
 
     #[test]

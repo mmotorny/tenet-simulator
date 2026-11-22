@@ -18,22 +18,37 @@ body {
   overscroll-behavior: none;
 }
 
+/* Title at the top, board in the middle, hint bar at the bottom, each centered. */
 #term {
-  padding: 1ch;
-  font-family: "SF Mono", Menlo, "DejaVu Sans Mono", Consolas, monospace;
-  font-size: clamp(10px, 3.2vw, 20px);
+  box-sizing: border-box;
+  height: 100%;
+  padding: 1lh 1ch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1lh;
+  /* Same font and size as GitHub code blocks. */
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 13.6px;
   line-height: 1.25;
   white-space: pre;
 }
 
-#term > div {
-  height: 1.25em;
+/* Blocks are centered on their own width; the board's time label hangs outside it. */
+#title,
+#board {
+  width: calc(var(--width) * 1ch);
+}
+
+#term div > div {
+  height: 1lh;
 }
 
 #term span {
   display: inline-block;
   width: 1ch;
-  height: 1.25em;
+  height: 1lh;
   overflow: hidden;
   text-align: center;
   vertical-align: top;
@@ -44,6 +59,7 @@ body {
 .glass { color: rgb(190 205 215); }
 .wall { color: rgb(140 140 140); }
 .floor { color: rgb(70 70 70); }
-.door { color: rgb(230 230 230); }
-.key { color: rgb(230 230 230); }
+.door,
+.key,
+.title { color: rgb(230 230 230); }
 .hint { color: rgb(110 110 110); }

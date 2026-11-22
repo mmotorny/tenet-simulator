@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // SPDX-FileCopyrightText: 2026 Maksym Motorny
 
-// The page is a minimal terminal emulator: it shows the same screen as the terminal front end,
-// with every glyph in its own fixed-width cell so rows line up whatever fonts the browser picks.
+// The page is a minimal terminal emulator: it shows the same screen as the terminal front end
+// (title at the top, board in the middle, hint bar at the bottom), with every glyph in its own
+// fixed-width cell so rows line up whatever fonts the browser picks.
 
 import init, { WebGame } from "./pkg/tenet_web.js";
 
 const COLOR_CLASSES = {
-  r: "red", b: "blue", g: "glass", w: "wall", f: "floor", d: "door", k: "key", h: "hint",
+  r: "red", b: "blue", g: "glass", w: "wall", f: "floor", d: "door", k: "key", h: "hint", t: "title",
 };
 const KEYS = {
   ArrowUp: "north", w: "north", k: "north",
@@ -18,10 +19,14 @@ const KEYS = {
 const SWIPE_MIN_PX = 24;
 
 const term = document.getElementById("term");
+const title = document.getElementById("title");
+const board = document.getElementById("board");
+const status = document.getElementById("status");
 
-function show(screen) {
-  term.replaceChildren(
-    ...screen.split("\n").map((encoded) => {
+// Fills `el` with encoded rows: each glyph followed by its color code (see web/src/lib.rs).
+function show(el, encodedRows) {
+  el.replaceChildren(
+    ...encodedRows.split("\n").map((encoded) => {
       const row = document.createElement("div");
       const chars = [...encoded];
       for (let i = 0; i + 1 < chars.length; i += 2) {
@@ -39,7 +44,13 @@ function show(screen) {
 async function main() {
   await init();
   const game = new WebGame();
-  const draw = () => show(game.screen());
+  title.style.setProperty("--width", [...game.title().split("\n")[0]].length / 2);
+  board.style.setProperty("--width", game.boardWidth());
+  const draw = () => {
+    show(title, game.title());
+    show(board, game.board());
+    show(status, game.status());
+  };
   const move = (dir) => {
     if (!game.exited()) {
       game.step(dir);

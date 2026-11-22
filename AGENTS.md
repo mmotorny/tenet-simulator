@@ -15,8 +15,9 @@ A simulator of strong determinism and time inversion, inspired by Nolan's *Tenet
 - `web/` (`tenet-web`): wasm-bindgen wrapper (`src/`) and the static page (`www/`). `./build-web.sh` builds it; CI deploys it to https://mmotorny.github.io/tenet-simulator/ (see `.github/workflows/pages.yml`).
 
 Commands:
-- `cargo run` — play interactively (arrows / wasd / hjkl, `q` to quit).
-- `cargo run -- --moves ddddww --trace` — scripted run that prints every frame. Use this to discuss runs as text.
+- `cargo run` — play interactively (arrows / wasd / hjkl, `r` to restart, `q` to quit). The screen is centered: title logo at the top, board in the middle, hint bar at the bottom.
+- `cargo run -- --moves ddddww --trace` — scripted run that prints every frame (without the title). Use this to discuss runs as text.
+- `cargo run -q -- --svg > docs/screenshot.svg` — regenerate the README screenshot; a test fails while it is stale. GitHub can't align glyph rows in Markdown code blocks (font fallback), hence the SVG.
 - `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings` — keep both clean (CI enforces it).
 
 ## Visual vocabulary
@@ -33,6 +34,8 @@ Commands:
 | Glass | `⋮` vertical, `⋯` horizontal (midline) | pale |
 | Doors (all doors) | `⠀` open → `⠉ ⠛ ⠿` → `⣿` closed (slide animation) | near-white |
 | Turnstile frame | `╭ ─ ╮ ╰ ╯` (thin, rounded) | red half / blue half |
+| Hint bar | keys bright, actions and `·` separators dim; arrows drawn as `←↑↓→` | near-white / dim gray |
+| Title logo | thin line art, reads the same rotated 180° (`ET` is `TE` upside down); `core/src/title.rs` | `TE` red, `N` neutral, `ET` blue |
 
 - Glass has **no solid junction glyphs** where it meets walls; the dotted rhythm reads as touching.
 - Rejected: dashed glass (`╎ ┊ ¦`), glass inside the turnstile, turnstile embedded in the outer wall, a partial glass wall, Braille as a full rendering surface.
