@@ -9,22 +9,20 @@
 
 use crate::view::{Color, Glyph};
 
-// Stroke contrast as in the film's logo: the stems of T and E are heavy and horizontals light,
-// via mixed-weight box-drawing glyphs (heavy vertical, light horizontal). The N inverts that, as
-// in classic high-contrast type: light verticals, heavy diagonal. Heavy strokes also carry the
-// bold attribute, which front ends that paint lines themselves (web, SVG) draw heavier still;
-// Unicode has nothing heavier than heavy, and no heavy diagonal at all.
-const T: [&str; 5] = ["╶─┰─╴", "  ┃  ", "  ┃  ", "  ┃  ", "  ┃  "];
-const E: [&str; 5] = ["┎───", "┃   ", "┠── ", "┃   ", "┖───"];
-const N: [&str; 5] = ["│╲    │", "│ ╲   │", "│  ╲  │", "│   ╲ │", "│    ╲│"];
-/// Glyphs whose heavy strokes are drawn bold: heavy verticals and the diagonal.
-const BOLD: &str = "┃┎┒┖┚┠┨┰┸╲";
+// Three rows tall, letters roughly square as on the poster (a cell is about half as wide as it
+// is tall). Stems are full blocks starting and ending on half blocks, so they sit flush with the
+// horizontals drawn at mid-row (heavy box-drawing lines: light ones look too thin on the white
+// slab); the E's middle bar lands exactly halfway. The N has line-weight verticals and a block
+// diagonal built from quadrants, stepping evenly.
+const T: [&str; 3] = ["╺━▄━╸", "  █  ", "  ▀  "];
+const E: [&str; 3] = ["▄━━━", "█━━ ", "▀━━━"];
+const N: [&str; 3] = ["╻▄▖ ╻", "┃▝█▖┃", "╹ ▝▀╹"];
 /// E rotated 180°.
-const E_INV: [&str; 5] = ["───┒", "   ┃", " ──┨", "   ┃", "───┚"];
+const E_INV: [&str; 3] = ["━━━▄", " ━━█", "━━━▀"];
 /// T rotated 180°.
-const T_INV: [&str; 5] = ["  ┃  ", "  ┃  ", "  ┃  ", "  ┃  ", "╶─┸─╴"];
+const T_INV: [&str; 3] = ["  ▄  ", "  █  ", "╺━▀━╸"];
 
-const LETTER_SPACING: usize = 2;
+const LETTER_SPACING: usize = 3;
 /// Slab padding left and right of the letters, in cells. Above and below, the slab extends by a
 /// half-block row, which is about as tall as two cells are wide.
 const SLAB_PADDING: usize = 2;
@@ -45,10 +43,7 @@ pub fn logo() -> Vec<Vec<Glyph>> {
     let mut logo = vec![edge('▄')];
     for row in rows {
         let mut line: Vec<Glyph> = pad().collect();
-        line.extend(row.chars().map(|ch| {
-            let glyph = Glyph::on(ch, (ch != ' ').then_some(Color::Ink), Color::Slab);
-            if BOLD.contains(ch) { glyph.bold() } else { glyph }
-        }));
+        line.extend(row.chars().map(|ch| Glyph::on(ch, (ch != ' ').then_some(Color::Ink), Color::Slab)));
         line.extend(pad());
         logo.push(line);
     }
@@ -77,15 +72,15 @@ mod tests {
             '┴' => '┬',
             '╴' => '╶',
             '╶' => '╴',
-            '┎' => '┚',
-            '┚' => '┎',
-            '┒' => '┖',
-            '┖' => '┒',
-            '┠' => '┨',
-            '┨' => '┠',
-            '┰' => '┸',
-            '┸' => '┰',
-            other => other, // ─ │ ┃ ╲ and space are symmetric
+            '▀' => '▄',
+            '▄' => '▀',
+            '▖' => '▝',
+            '▝' => '▖',
+            '╻' => '╹',
+            '╹' => '╻',
+            '╸' => '╺',
+            '╺' => '╸',
+            other => other, // ━ ┃ █ and space are symmetric
         }
     }
 
@@ -105,14 +100,10 @@ mod tests {
     #[test]
     fn letters_are_black_on_a_white_slab() {
         let rows = logo();
-        assert_eq!((rows.len(), rows[0].len()), (7, 37));
+        assert_eq!((rows.len(), rows[0].len()), (5, 39));
         assert!(rows[0].iter().all(|g| g.ch == '▄' && g.color == Some(Color::Slab) && g.bg.is_none()));
-        assert!(rows[6].iter().all(|g| g.ch == '▀' && g.color == Some(Color::Slab) && g.bg.is_none()));
-        assert!(rows[1..6].iter().flatten().all(|g| g.bg == Some(Color::Slab)));
-        assert!(rows[1..6].iter().flatten().filter(|g| g.ch != ' ').all(|g| g.color == Some(Color::Ink)));
-        assert!(rows[1..6].iter().flatten().all(|g| g.bold == BOLD.contains(g.ch)));
-        // The N's verticals stay light; only its diagonal is bold.
-        let n_row: String = rows[1].iter().map(|g| g.ch).collect();
-        assert!(n_row.contains("│╲    │"));
+        assert!(rows[4].iter().all(|g| g.ch == '▀' && g.color == Some(Color::Slab) && g.bg.is_none()));
+        assert!(rows[1..4].iter().flatten().all(|g| g.bg == Some(Color::Slab)));
+        assert!(rows[1..4].iter().flatten().filter(|g| g.ch != ' ').all(|g| g.color == Some(Color::Ink)));
     }
 }

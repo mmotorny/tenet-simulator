@@ -35,7 +35,7 @@ Commands:
 | Doors (all doors) | `⠀` open → `⠉ ⠛ ⠿` → `⣿` closed (slide animation) | near-white |
 | Turnstile frame | `╭ ─ ╮ ╰ ╯` (thin, rounded) | red half / blue half |
 | Hint bar | keys bright, actions and `·` separators dim; arrows drawn as `←↑↓→` | near-white / dim gray |
-| Title logo | thin line art, reads the same rotated 180° (`T E N Ǝ ⊥`); stroke contrast like the film's logo: T/E stems heavy (mixed-weight glyphs `┃ ┎ ┠ ┖ ┰ ┸`), horizontals light, N with light verticals and a heavy diagonal. Heavy strokes and the diagonal are `bold`, drawn at 4× the light stroke on web and SVG (Unicode tops out at heavy; the terminal shows heavy); `core/src/title.rs`. A bold block-letter version was tried and rejected | black ink on a white slab (as in the film); slab edges are `▄`/`▀` half-block rows |
+| Title logo | 3 rows, letters roughly square like the poster, reading the same rotated 180° (`T E N Ǝ ⊥`): block stems (`▄ █ ▀`), heavy bars (`━ ╺ ╸`), N with heavy-line verticals (`╻ ┃ ╹`) and an evenly stepped quadrant-block diagonal; `core/src/title.rs`. Rejected: thin line art, 5-row block letters, light lines on the slab (too thin) | black ink on a white slab (as in the film); slab edges are `▄`/`▀` half-block rows |
 
 - Glass has **no solid junction glyphs** where it meets walls; the dotted rhythm reads as touching.
 - Rejected: dashed glass (`╎ ┊ ¦`), glass inside the turnstile, turnstile embedded in the outer wall, a partial glass wall, Braille as a full rendering surface.
@@ -73,5 +73,5 @@ Commands:
 - Diagrams must stay readable as plain text: the CLI honors `NO_COLOR`, and glyphs (not just color) distinguish forward from inverted.
 - Licensed BSD-3-Clause (`LICENSE`). Every source file starts with SPDX headers:
   `// SPDX-License-Identifier: BSD-3-Clause` and `// SPDX-FileCopyrightText: 2026 Maksym Motorny`.
-- Glyphs carry a foreground color, an optional background color (`Glyph::bg`) and a `bold` flag (web/SVG draw bold heavy strokes and diagonals at 4× light; SGR bold in the terminal).
+- Glyphs carry a foreground color, an optional background color (`Glyph::bg`) and a `bold` flag (web/SVG draw bold heavy strokes and diagonals at 4× light; SGR bold in the terminal). The logo no longer uses `bold`; its weight comes from block elements.
 - Like a terminal emulator, the painter (`core/src/paint.rs`) draws block elements (`view::block_quadrants`), box-drawing lines (`view::line_arms`), rounded corners and diagonals as geometry instead of font glyphs, so they join exactly across cells. Both the web canvas and the SVG export use it; only other glyphs are drawn as text.

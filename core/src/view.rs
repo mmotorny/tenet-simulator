@@ -385,6 +385,10 @@ pub fn line_arms(ch: char) -> Option<[u8; 4]> {
         '╴' => [1, 0, 0, 0],
         '╶' => [0, 1, 0, 0],
         '━' => [2, 2, 0, 0],
+        '╸' => [2, 0, 0, 0],
+        '╺' => [0, 2, 0, 0],
+        '╹' => [0, 0, 2, 0],
+        '╻' => [0, 0, 0, 2],
         '┃' => [0, 0, 2, 2],
         '┏' => [0, 2, 0, 2],
         '┓' => [2, 0, 0, 2],
@@ -461,11 +465,11 @@ mod tests {
         let rows = screen(&game, &[("q", "quit")], &[]).stacked(true);
         let text = to_plain_text(&rows);
         let lines: Vec<&str> = text.lines().collect();
-        // Title slab (37 wide) is the widest block; the 29-wide map is indented by 4, the label hangs.
+        // Title slab (39 wide) is the widest block; the 29-wide map is indented by 5, the label hangs.
         assert!(lines[0].starts_with("▄▄▄▄"));
-        assert!(lines[1].starts_with("  ╶─┰─╴"));
-        assert!(lines[8].starts_with("    ┏━━"));
-        assert!(lines[10].ends_with("⠀    t = 0 ▲"));
+        assert!(lines[1].starts_with("  ╺━▄━╸"));
+        assert!(lines[6].starts_with("     ┏━━"));
+        assert!(lines[8].ends_with("⠀    t = 0 ▲"));
         assert_eq!(lines.last().unwrap().trim(), "q quit");
     }
 
@@ -473,7 +477,7 @@ mod tests {
     fn layout_puts_title_on_top_status_at_bottom_board_centered() {
         let game = Game::new(Level::parse(crate::levels::FREEPORT).unwrap());
         let screen = screen(&game, &[("q", "quit")], &[]);
-        assert_eq!(screen.min_size(), (53, 21)); // board 29 + label overhang 11 on both sides
+        assert_eq!(screen.min_size(), (53, 19)); // board 29 + label overhang 11 on both sides
         let grid = screen.grid(80, 30);
         let text = to_plain_text(&grid);
         let lines: Vec<&str> = text.lines().collect();
