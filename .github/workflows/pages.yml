@@ -21,11 +21,8 @@ concurrency:
 
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - run: rustup target add wasm32-unknown-unknown && rustup component add clippy
@@ -39,5 +36,13 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web/www
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - id: deployment
         uses: actions/deploy-pages@v4
