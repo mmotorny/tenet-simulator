@@ -416,10 +416,10 @@ mod tests {
         let rows = screen(&game, &[("q", "quit")], &[]).stacked(true);
         let text = to_plain_text(&rows);
         let lines: Vec<&str> = text.lines().collect();
-        // Title (55 wide) is the widest block; the 29-wide map is indented by 13, the label hangs.
-        assert!(lines[0].starts_with("▀▀▀▀█▀▀▀▀"));
-        assert!(lines[5].starts_with("             ┏━━"));
-        assert!(lines[7].ends_with("⠀    t = 0 ▲"));
+        // Title (33 wide) is the widest block; the 29-wide map is indented by two, the label hangs.
+        assert!(lines[0].starts_with("╶─┬─╴"));
+        assert!(lines[6].starts_with("  ┏━━"));
+        assert!(lines[8].ends_with("⠀    t = 0 ▲"));
         assert_eq!(lines.last().unwrap().trim(), "q quit");
     }
 

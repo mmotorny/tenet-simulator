@@ -65,8 +65,8 @@ fn paint(out: &mut String, text: &str, color: Option<Color>, enabled: bool) {
     }
 }
 
-const PLAYING_HINTS: &[view::Hint] = &[("←↑↓→ wasd hjkl", "move"), ("r", "restart"), ("q", "quit")];
-const EXITED_HINTS: &[view::Hint] = &[("r", "restart"), ("q", "quit")];
+const PLAYING_HINTS: &[view::Hint] = &[("←↑↓→ wasd hjkl", "move"), ("r", "restart"), ("q esc", "quit")];
+const EXITED_HINTS: &[view::Hint] = &[("r", "restart"), ("q esc", "quit")];
 
 fn screen(game: &Game) -> view::Screen {
     view::screen(game, PLAYING_HINTS, EXITED_HINTS)
