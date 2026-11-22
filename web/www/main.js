@@ -62,7 +62,7 @@ async function main() {
     }
   });
 
-  // Touch: swipe to move; tap after leaving to restart.
+  // Touch: a swipe anywhere on the screen acts like a cursor key; a tap after leaving restarts.
   let touchStart = null;
   document.addEventListener("touchstart", (e) => {
     touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
