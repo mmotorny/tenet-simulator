@@ -4,17 +4,19 @@
 //! WebAssembly bindings: the page drives the game through [`WebGame`], which draws the screen onto
 //! a canvas the way a terminal emulator draws its cell buffer.
 
-use tenet_core::game::{Dir, Game, Status, StepOutcome};
+use tenet_core::game::{Dir, Status};
 use tenet_core::level::Level;
 use tenet_core::levels;
 use tenet_core::paint::{paint, Metrics, Shape};
+use tenet_core::session::{Input, Session};
 use tenet_core::view;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
-const PLAYING_HINTS: &[view::Hint] = &[("←↑↓→ wasd hjkl swipe", "move"), ("r", "restart")];
-const EXITED_HINTS: &[view::Hint] = &[("r tap", "restart")];
+const PLAYING_HINTS: &[view::Hint] = &[("←↑↓→ wasd swipe", "move"), ("u", "undo"), ("r", "restart")];
+const EXITED_HINTS: &[view::Hint] =
+    &[("j", "rewind"), ("k", "pause"), ("l", "play"), (", .", "step"), ("u", "undo"), ("r", "restart")];
 
 /// JetBrains Mono (loaded by the page), then the GitHub monospace stack as fallback.
 const FONT_FAMILY: &str =
@@ -24,50 +26,58 @@ const FONT_PX: f64 = 13.6;
 const LINE_HEIGHT: f64 = 1.25;
 const BACKGROUND: &str = "#000";
 
+/// The web front end: a thin wrapper around a [`Session`] that maps input names to inputs and
+/// draws the session's screen onto a canvas.
 #[wasm_bindgen]
 pub struct WebGame {
-    level: Level,
-    game: Game,
+    session: Session,
 }
 
 #[wasm_bindgen]
 impl WebGame {
-    /// Starts the bundled prototype level.
+    /// Starts the bundled level.
     #[wasm_bindgen(constructor)]
     pub fn new() -> Result<WebGame, JsError> {
         let level = Level::parse(levels::FREEPORT).map_err(|e| JsError::new(&e.to_string()))?;
-        Ok(Self { game: Game::new(level.clone()), level })
+        Ok(Self { session: Session::new(level) })
     }
 
-    pub fn reset(&mut self) {
-        self.game = Game::new(self.level.clone());
-    }
-
-    /// Moves the protagonist: `dir` is "north", "south", "east" or "west".
-    /// Returns "moved", "inverted", "blocked" or "exited".
-    pub fn step(&mut self, dir: &str) -> Result<String, JsError> {
-        let dir = match dir {
-            "north" => Dir::North,
-            "south" => Dir::South,
-            "east" => Dir::East,
-            "west" => Dir::West,
-            _ => return Err(JsError::new(&format!("unknown direction {dir:?}"))),
+    /// Feeds an input: "north", "south", "east", "west", "undo", "restart", "rewind", "pause",
+    /// "play", "toggle", "back" or "forward" (the last six control the tape after winning).
+    pub fn input(&mut self, name: &str) -> Result<(), JsError> {
+        let input = match name {
+            "north" => Input::Move(Dir::North),
+            "south" => Input::Move(Dir::South),
+            "east" => Input::Move(Dir::East),
+            "west" => Input::Move(Dir::West),
+            "undo" => Input::Undo,
+            "restart" => Input::Restart,
+            "rewind" => Input::Rewind,
+            "pause" => Input::Pause,
+            "play" => Input::Play,
+            "toggle" => Input::TogglePlay,
+            "back" => Input::StepBack,
+            "forward" => Input::StepForward,
+            _ => return Err(JsError::new(&format!("unknown input {name:?}"))),
         };
-        Ok(match self.game.step(dir) {
-            StepOutcome::Moved => "moved",
-            StepOutcome::Inverted => "inverted",
-            StepOutcome::Blocked => "blocked",
-            StepOutcome::Exited => "exited",
-        }
-        .to_string())
+        self.session.input(input);
+        Ok(())
     }
 
-    pub fn moves(&self) -> u32 {
-        self.game.moves()
+    /// Milliseconds until the screen changes by itself (an animation or the playing tape), or -1
+    /// if it waits for input. Call [`WebGame::advance`] then.
+    #[wasm_bindgen(js_name = nextDeadline)]
+    pub fn next_deadline(&self) -> i32 {
+        self.session.next_deadline().map_or(-1, |ms| ms as i32)
     }
 
+    pub fn advance(&mut self) {
+        self.session.advance();
+    }
+
+    /// Whether the level is over (the tape controls apply).
     pub fn exited(&self) -> bool {
-        self.game.status() == Status::Exited
+        self.session.game().status() == Status::Exited
     }
 
     /// Draws the screen onto `canvas`, filling its CSS size at the device's pixel density.
@@ -84,7 +94,7 @@ impl WebGame {
 
         ctx.set_font(&format!("100px {FONT_FAMILY}"));
         let advance = ctx.measure_text("0")?.width() / 100.0;
-        let screen = view::screen(&self.game, PLAYING_HINTS, EXITED_HINTS);
+        let screen = self.session.screen(PLAYING_HINTS, EXITED_HINTS);
         let grid = Grid::fit(css_w, css_h, dpr, advance, screen.min_size());
         let cells = screen.grid(grid.cols, grid.rows);
 
@@ -185,20 +195,17 @@ mod tests {
     const ADVANCE: f64 = 0.6;
 
     #[test]
-    fn walks_out_of_the_exit() {
+    fn plays_the_level_through_named_inputs() {
         let mut game = WebGame::new().unwrap();
-        // Up to the glass, back to the turnstile, invert, then out of the exit door in the past.
-        let moves = [("east", 5), ("north", 4), ("east", 2), ("west", 2), ("south", 2), ("east", 9), ("north", 2), ("east", 2)];
-        let mut last = String::new();
-        for (dir, n) in moves {
-            for _ in 0..n {
-                last = game.step(dir).unwrap();
-            }
+        for ch in "ddwwdddddddddwwdddd".chars() {
+            let name = if ch == 'w' { "north" } else { "east" };
+            game.input(name).unwrap();
         }
-        assert_eq!(last, "exited");
         assert!(game.exited());
-        game.reset();
-        assert_eq!((game.moves(), game.exited()), (0, false));
+        game.input("pause").unwrap(); // skips the celebration; the tape is paused
+        assert_eq!(game.next_deadline(), -1);
+        game.input("undo").unwrap();
+        assert!(!game.exited());
     }
 
     #[test]

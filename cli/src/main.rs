@@ -4,20 +4,24 @@
 //! Terminal front end.
 //!
 //! Interactive:  tenet [LEVEL_FILE]
-//! Scripted:     tenet --moves ddddw [--trace] [LEVEL_FILE]
+//! Scripted:     tenet --moves ddddw [LEVEL_FILE]
 //!
-//! Moves are w/a/s/d (or h/j/k/l). Scripted mode prints the final frame, or every frame with
-//! `--trace`, which makes it easy to discuss a run as plain text. `--svg` prints the final frame
-//! as an SVG image instead (used for the README screenshot). Colors are on unless `NO_COLOR`
-//! is set or `--no-color` is passed.
+//! Demo:         tenet --demo-svg [LEVEL_FILE]
+//!
+//! Moves are w/a/s/d. Scripted mode prints the final frame as text, which makes it easy to
+//! discuss a run; with `--svg` it prints it as an SVG image instead. `--demo-svg` records the
+//! perfect play, the winning animation and the tape rewinding as one looping animated SVG (the
+//! README demo). Colors are on unless `NO_COLOR` is set or `--no-color` is passed.
 
 use std::io::{self, Write};
 use std::process::ExitCode;
+use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::{cursor, execute, queue, terminal};
-use tenet_core::game::{Dir, Game, Status, StepOutcome};
+use tenet_core::game::{Dir, Status};
 use tenet_core::level::Level;
+use tenet_core::session::{Input, Session};
 use tenet_core::view::{self, Glyph};
 
 const DEFAULT_LEVEL: &str = tenet_core::levels::FREEPORT;
@@ -25,8 +29,8 @@ const DEFAULT_LEVEL: &str = tenet_core::levels::FREEPORT;
 struct Options {
     level_path: Option<String>,
     moves: Option<String>,
-    trace: bool,
     svg: bool,
+    demo_svg: bool,
     color: bool,
 }
 
@@ -34,16 +38,16 @@ fn parse_args() -> Result<Options, String> {
     let mut opts = Options {
         level_path: None,
         moves: None,
-        trace: false,
         svg: false,
+        demo_svg: false,
         color: std::env::var_os("NO_COLOR").is_none_or(|v| v.is_empty()),
     };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--moves" => opts.moves = Some(args.next().ok_or("--moves needs a value")?),
-            "--trace" => opts.trace = true,
             "--svg" => opts.svg = true,
+            "--demo-svg" => opts.demo_svg = true,
             "--no-color" => opts.color = false,
             "-h" | "--help" => return Err(String::new()),
             s if s.starts_with('-') => return Err(format!("unknown option {s}")),
@@ -53,7 +57,7 @@ fn parse_args() -> Result<Options, String> {
     Ok(opts)
 }
 
-const USAGE: &str = "usage: tenet [--moves wasd...] [--trace | --svg] [--no-color] [LEVEL_FILE]";
+const USAGE: &str = "usage: tenet [--moves wasd... [--svg]] [--demo-svg] [--no-color] [LEVEL_FILE]";
 
 fn paint(out: &mut String, text: &str, glyph: &Glyph, enabled: bool) {
     let Glyph { color, bg, bold, .. } = *glyph;
@@ -76,15 +80,24 @@ fn paint(out: &mut String, text: &str, glyph: &Glyph, enabled: bool) {
     out.push_str("\x1b[0m");
 }
 
-const PLAYING_HINTS: &[view::Hint] = &[("←↑↓→ wasd hjkl", "move"), ("r", "restart"), ("q esc", "quit")];
-const EXITED_HINTS: &[view::Hint] = &[("r", "restart"), ("q esc", "quit")];
+const PLAYING_HINTS: &[view::Hint] = &[("←↑↓→ wasd", "move"), ("u", "undo"), ("r", "restart"), ("q esc", "quit")];
+const EXITED_HINTS: &[view::Hint] =
+    &[("j", "rewind"), ("k", "pause"), ("l", "play"), (", .", "step"), ("u", "undo"), ("r", "restart"), ("q esc", "quit")];
 
-fn screen(game: &Game) -> view::Screen {
-    view::screen(game, PLAYING_HINTS, EXITED_HINTS)
+fn screen(session: &Session) -> view::Screen {
+    session.screen(PLAYING_HINTS, EXITED_HINTS)
 }
 
-/// A row of glyphs as optionally colored text.
+/// A row of glyphs as optionally colored text. Without color, glyphs that rely on color to carry
+/// meaning are swapped for distinct shapes.
 fn line(row: &[Glyph], color: bool) -> String {
+    let mono: Vec<Glyph>;
+    let row = if color {
+        row
+    } else {
+        mono = row.iter().copied().map(view::monochrome).collect();
+        &mono
+    };
     let mut out = String::new();
     // Group runs of the same attributes to keep escape sequences short.
     for run in row.chunk_by(|a, b| (a.color, a.bg, a.bold) == (b.color, b.bg, b.bold)) {
@@ -95,56 +108,73 @@ fn line(row: &[Glyph], color: bool) -> String {
 }
 
 /// The screen as one centered column of text, for output that isn't a live terminal screen.
-fn stacked_text(game: &Game, with_title: bool, color: bool) -> String {
-    screen(game).stacked(with_title).iter().map(|r| line(r, color)).collect::<Vec<_>>().join("\n")
+fn stacked_text(session: &Session, with_title: bool, color: bool) -> String {
+    screen(session).stacked(with_title).iter().map(|r| line(r, color)).collect::<Vec<_>>().join("\n")
 }
 
 fn dir_for_char(ch: char) -> Option<Dir> {
     match ch.to_ascii_lowercase() {
-        'w' | 'k' => Some(Dir::North),
-        's' | 'j' => Some(Dir::South),
-        'd' | 'l' => Some(Dir::East),
-        'a' | 'h' => Some(Dir::West),
+        'w' => Some(Dir::North),
+        's' => Some(Dir::South),
+        'd' => Some(Dir::East),
+        'a' => Some(Dir::West),
         _ => None,
     }
 }
 
 fn parse_move(ch: char) -> Result<Dir, String> {
-    dir_for_char(ch).ok_or_else(|| format!("invalid move {ch:?}; use w/a/s/d or h/j/k/l"))
+    dir_for_char(ch).ok_or_else(|| format!("invalid move {ch:?}; use w/a/s/d"))
 }
 
-/// The whole screen, title included, as an SVG image after playing `moves`.
-fn svg_frame(mut game: Game, moves: &str) -> Result<String, String> {
+/// Plays `moves`, skipping animations; scripted output shows where they end up.
+fn play(session: &mut Session, moves: &str) -> Result<(), String> {
     for ch in moves.chars().filter(|c| !c.is_whitespace()) {
-        game.step(parse_move(ch)?);
-    }
-    Ok(tenet_core::paint::to_svg(&screen(&game).stacked(true)))
-}
-
-fn run_scripted(mut game: Game, moves: &str, trace: bool, color: bool) -> Result<(), String> {
-    // Scripted frames leave out the title to keep runs compact for discussion.
-    let print = |game: &Game| println!("{}\n", stacked_text(game, false, color));
-    if trace {
-        print(&game);
-    }
-    for ch in moves.chars().filter(|c| !c.is_whitespace()) {
-        let dir = parse_move(ch)?;
-        let outcome = game.step(dir);
-        if trace {
-            if outcome == StepOutcome::Blocked {
-                println!("({ch}: blocked)\n");
-            } else {
-                print(&game);
-            }
-        }
-        if game.status() == Status::Exited {
+        session.input(Input::Move(parse_move(ch)?));
+        if session.game().status() == Status::Exited {
             break;
         }
     }
-    if !trace {
-        print(&game);
-    }
+    session.settle();
     Ok(())
+}
+
+fn run_scripted(mut session: Session, moves: &str, color: bool) -> Result<(), String> {
+    play(&mut session, moves)?;
+    // Scripted frames leave out the title to keep runs compact for discussion.
+    println!("{}\n", stacked_text(&session, false, color));
+    Ok(())
+}
+
+/// How long each move stays on screen in the recorded demo.
+const DEMO_MOVE_MS: u32 = 350;
+
+/// The README demo: the perfect play of the level with its animations, the winning logo flip and
+/// the tape rewinding to the start, as one looping animated SVG.
+fn demo_svg(mut session: Session) -> Result<String, String> {
+    let moves = tenet_core::solver::shortest_solution(session.game().level(), 80).ok_or("the level has no solution")?;
+    let mut frames: Vec<(view::Screen, u32)> = vec![(screen(&session), 1200)];
+    for dir in moves {
+        session.input(Input::Move(dir));
+        // The move's own animations (door slides), then the move itself held for a beat.
+        while let Some(ms) = session.next_deadline().filter(|_| session.game().status() != Status::Exited) {
+            frames.push((screen(&session), ms));
+            session.advance();
+        }
+        frames.push((screen(&session), DEMO_MOVE_MS));
+    }
+    // The celebration and the tape rewinding by itself, until it stops at the start.
+    frames.pop();
+    while let Some(ms) = session.next_deadline() {
+        frames.push((screen(&session), ms));
+        session.advance();
+    }
+    frames.push((screen(&session), 2500));
+
+    // One fixed grid for every frame, like a terminal, so nothing shifts between frames.
+    let cols = frames.iter().map(|(s, _)| s.min_size().0).max().unwrap_or(0);
+    let rows = frames.iter().map(|(s, _)| s.min_size().1).max().unwrap_or(0);
+    let grids: Vec<(Vec<Vec<Glyph>>, u32)> = frames.iter().map(|(s, ms)| (s.grid(cols, rows), *ms)).collect();
+    Ok(tenet_core::paint::to_animated_svg(&grids))
 }
 
 /// Restores the terminal even if the game loop returns early or panics.
@@ -166,9 +196,9 @@ impl Drop for TerminalGuard {
 }
 
 /// Draws the screen centered: title at the top, status at the bottom, board in between.
-fn draw(game: &Game, color: bool) -> io::Result<()> {
+fn draw(session: &Session, color: bool) -> io::Result<()> {
     let (cols, rows) = terminal::size()?;
-    let screen = screen(game);
+    let screen = screen(session);
     let mut out = io::stdout();
     queue!(out, terminal::Clear(terminal::ClearType::All))?;
     for view::Placement { x, y, row } in screen.layout(cols as usize, rows as usize) {
@@ -180,36 +210,55 @@ fn draw(game: &Game, color: bool) -> io::Result<()> {
     out.flush()
 }
 
-fn run_interactive(level: Level, color: bool) -> io::Result<()> {
-    let mut game = Game::new(level.clone());
+/// The input a key stands for. Movement keys only ever move the protagonist and the tape's
+/// transport keys (as in YouTube and video editors) only ever control the tape: no modes.
+fn input_for(code: KeyCode) -> Option<Input> {
+    Some(match code {
+        KeyCode::Up => Input::Move(Dir::North),
+        KeyCode::Down => Input::Move(Dir::South),
+        KeyCode::Right => Input::Move(Dir::East),
+        KeyCode::Left => Input::Move(Dir::West),
+        KeyCode::Char('u') => Input::Undo,
+        KeyCode::Char('r') => Input::Restart,
+        KeyCode::Char('j') => Input::Rewind,
+        KeyCode::Char('k') => Input::Pause,
+        KeyCode::Char('l') => Input::Play,
+        KeyCode::Char(' ') => Input::TogglePlay,
+        KeyCode::Char(',') => Input::StepBack,
+        KeyCode::Char('.') => Input::StepForward,
+        KeyCode::Char(ch) => Input::Move(dir_for_char(ch)?),
+        _ => return None,
+    })
+}
+
+fn run_interactive(mut session: Session, color: bool) -> io::Result<()> {
     {
         let _guard = TerminalGuard::enter()?;
         loop {
-            draw(&game, color)?;
+            draw(&session, color)?;
+            // Animations and the playing tape move on by themselves when no key arrives in time.
+            if let Some(ms) = session.next_deadline() {
+                if !event::poll(Duration::from_millis(ms.into()))? {
+                    session.advance();
+                    continue;
+                }
+            }
             let Event::Key(KeyEvent { code, modifiers, kind: KeyEventKind::Press, .. }) = event::read()? else {
                 continue; // resize and other events just trigger a redraw
             };
-            let dir = match code {
-                KeyCode::Up => Some(Dir::North),
-                KeyCode::Down => Some(Dir::South),
-                KeyCode::Right => Some(Dir::East),
-                KeyCode::Left => Some(Dir::West),
+            match code {
                 KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => break,
                 KeyCode::Char('q') | KeyCode::Esc => break,
-                KeyCode::Char('r') => {
-                    game = Game::new(level.clone());
-                    None
+                code => {
+                    if let Some(input) = input_for(code) {
+                        session.input(input);
+                    }
                 }
-                KeyCode::Char(ch) => dir_for_char(ch),
-                _ => None,
-            };
-            if let Some(dir) = dir {
-                game.step(dir);
             }
         }
     }
     // Leave the final frame on the normal screen.
-    println!("{}", stacked_text(&game, false, color));
+    println!("{}", stacked_text(&session, false, color));
     Ok(())
 }
 
@@ -242,10 +291,17 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let result = match (&opts.moves, opts.svg) {
-        (moves, true) => svg_frame(Game::new(level), moves.as_deref().unwrap_or("")).map(|svg| print!("{svg}")),
-        (Some(moves), false) => run_scripted(Game::new(level), moves, opts.trace, opts.color),
-        (None, false) => run_interactive(level, opts.color).map_err(|e| e.to_string()),
+    let session = Session::new(level);
+    let result = if opts.demo_svg {
+        demo_svg(session).map(|svg| print!("{svg}"))
+    } else if opts.svg {
+        let mut session = session;
+        play(&mut session, opts.moves.as_deref().unwrap_or(""))
+            .map(|()| print!("{}", tenet_core::paint::to_svg(&screen(&session).stacked(true))))
+    } else if let Some(moves) = &opts.moves {
+        run_scripted(session, moves, opts.color)
+    } else {
+        run_interactive(session, opts.color).map_err(|e| e.to_string())
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -260,18 +316,12 @@ fn main() -> ExitCode {
 mod tests {
     use super::*;
 
-    /// The README screenshot: mid-run, inverted, with the forward self replaying at the same moment.
-    const README_MOVES: &str = "dddddwwwwddaassdddddd";
-
-    /// Regenerate with: cargo run -q -- --svg --moves dddddwwwwddaassdddddd > docs/screenshot.svg
+    /// Regenerate with: cargo run -q -- --demo-svg > docs/demo.svg
     #[test]
-    fn readme_screenshot_is_up_to_date() {
+    fn readme_demo_is_up_to_date() {
         let level = Level::parse(DEFAULT_LEVEL).unwrap();
-        let expected = svg_frame(Game::new(level), README_MOVES).unwrap();
-        let committed = include_str!("../../docs/screenshot.svg");
-        assert!(
-            committed == expected,
-            "docs/screenshot.svg is stale; run: cargo run -q -- --svg --moves {README_MOVES} > docs/screenshot.svg"
-        );
+        let expected = demo_svg(Session::new(level)).unwrap();
+        let committed = include_str!("../../docs/demo.svg");
+        assert!(committed == expected, "docs/demo.svg is stale; run: cargo run -q -- --demo-svg > docs/demo.svg");
     }
 }

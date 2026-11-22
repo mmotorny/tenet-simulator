@@ -10,22 +10,23 @@
 //! | `g`  | glass |
 //! | `E`  | entry door |
 //! | `X`  | exit door |
-//! | `S`  | start: where the protagonist appears, just outside the entry door |
-//! | `F`  | finish: stepping onto it ends the level, just outside the exit door |
-//! | ` `  | nothing (outside the room) |
+//! | `S`  | start: a marker floor just outside the entry door, where the protagonist appears |
+//! | `F`  | finish: a marker floor just outside the exit door; stepping onto it ends the level |
+//! | ` `  | nothing (outside the room): can't be entered, so it acts as an invisible wall |
 //! | `T`  | turnstile frame |
 //! | `r`  | turnstile door, red (forward) side |
 //! | `b`  | turnstile door, blue (inverted) side |
 //! | `_`  | turnstile interior |
 //!
-//! Rows may be ragged; short rows are padded with nothing. The turnstile is a red door, two
-//! interior cells, and a blue door in a straight line. Its mirror lies between the two interior
-//! cells: stepping across it reverses a self's arrow of time.
+//! Rows may be ragged; short rows are padded with nothing. The turnstile is a red door, an even
+//! number of interior cells, and a blue door in a straight line. Its mirror lies halfway, between
+//! the red and blue halves of the interior: stepping across it reverses a self's arrow of time.
 //!
 //! After the map, a blank line and optional `key: value` properties:
 //!
 //! | Key | Meaning |
 //! |-----|---------|
+//! | `entry-closes` | global time from which the entry door is closed (open before it) |
 //! | `exit-closes` | global time from which the exit door is closed (open before it) |
 //! | `timeline` | global time range the timeline shows at least, as `lo..hi` |
 
@@ -104,7 +105,8 @@ impl Tile {
     }
 }
 
-/// The turnstile's cells, red side to blue side.
+/// The turnstile, red side to blue side. `red_cell` and `blue_cell` are the interior cells on
+/// either side of the mirror.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Turnstile {
     pub red_door: Pos,
@@ -118,8 +120,11 @@ impl Turnstile {
         pos == self.red_door || pos == self.blue_door
     }
 
+    /// Whether `pos` is an interior cell, strictly between the two doors.
     pub fn is_inside(&self, pos: Pos) -> bool {
-        pos == self.red_cell || pos == self.blue_cell
+        let (a, b) = (self.red_door, self.blue_door);
+        let between = |p: i32, x: i32, y: i32| x.min(y) < p && p < x.max(y);
+        (a.y == b.y && pos.y == a.y && between(pos.x, a.x, b.x)) || (a.x == b.x && pos.x == a.x && between(pos.y, a.y, b.y))
     }
 
     /// Whether moving from `from` to `to` crosses the mirror.
@@ -135,8 +140,10 @@ pub struct Level {
     tiles: Vec<Tile>,
     start: Pos,
     finish: Pos,
+    entry: Pos,
     exit: Pos,
     turnstile: Option<Turnstile>,
+    entry_closes: Option<i32>,
     exit_closes: Option<i32>,
     timeline: (i32, i32),
 }
@@ -150,7 +157,8 @@ pub enum ParseError {
     UnknownChar { ch: char, x: usize, y: usize },
     /// A tile that must appear exactly once is missing or repeated.
     NeedsExactlyOne { tile: &'static str, found: usize },
-    /// The turnstile needs a red door, two interior cells and a blue door in a straight line.
+    /// The turnstile needs a red door, an even number of interior cells and a blue door in a
+    /// straight line.
     BadTurnstile,
     BadProperty { line: String },
 }
@@ -163,7 +171,7 @@ impl fmt::Display for ParseError {
             ParseError::NeedsExactlyOne { tile, found } => write!(f, "level needs exactly one {tile}, found {found}"),
             ParseError::BadTurnstile => write!(
                 f,
-                "turnstile needs a red door (r), two interior cells (_) and a blue door (b) in a straight line"
+                "turnstile needs a red door (r), an even number of interior cells (_) and a blue door (b) in a straight line"
             ),
             ParseError::BadProperty { line } => write!(f, "invalid level property {line:?}"),
         }
@@ -200,7 +208,7 @@ impl Level {
 
         let start = one(Tile::Start, "start (S)")?;
         let finish = one(Tile::Finish, "finish (F)")?;
-        one(Tile::Entry, "entry door (E)")?;
+        let entry = one(Tile::Entry, "entry door (E)")?;
         let exit = one(Tile::Exit, "exit door (X)")?;
         let mut level = Self {
             width: width as i32,
@@ -208,8 +216,10 @@ impl Level {
             tiles,
             start,
             finish,
+            entry,
             exit,
             turnstile: None,
+            entry_closes: None,
             exit_closes: None,
             timeline: DEFAULT_TIMELINE,
         };
@@ -220,14 +230,18 @@ impl Level {
             ([], []) => None,
             ([r], [b]) => {
                 let (dx, dy) = (b.x - r.x, b.y - r.y);
-                let straight = (dx == 0 && dy.abs() == 3) || (dy == 0 && dx.abs() == 3);
-                let red_cell = Pos::new(r.x + dx.signum(), r.y + dy.signum());
-                let blue_cell = Pos::new(red_cell.x + dx.signum(), red_cell.y + dy.signum());
-                let inside = |p| level.tile(p) == Some(Tile::TurnstileInterior);
-                if !straight || !inside(red_cell) || !inside(blue_cell) {
+                let length = dx.abs().max(dy.abs());
+                // Straight, with an even number (at least two) of interior cells between the doors.
+                if (dx != 0 && dy != 0) || length < 3 || length % 2 == 0 {
                     return Err(ParseError::BadTurnstile);
                 }
-                Some(Turnstile { red_door: *r, red_cell, blue_cell, blue_door: *b })
+                let step = Pos::new(dx.signum(), dy.signum());
+                let at = |i: i32| Pos::new(r.x + step.x * i, r.y + step.y * i);
+                if (1..length).any(|i| level.tile(at(i)) != Some(Tile::TurnstileInterior)) {
+                    return Err(ParseError::BadTurnstile);
+                }
+                let half = (length - 1) / 2;
+                Some(Turnstile { red_door: *r, red_cell: at(half), blue_cell: at(half + 1), blue_door: *b })
             }
             _ => return Err(ParseError::BadTurnstile),
         };
@@ -237,6 +251,7 @@ impl Level {
             let (key, value) = line.split_once(':').ok_or_else(bad)?;
             let value = value.trim();
             match key.trim() {
+                "entry-closes" => level.entry_closes = Some(value.parse().map_err(|_| bad())?),
                 "exit-closes" => level.exit_closes = Some(value.parse().map_err(|_| bad())?),
                 "timeline" => {
                     let (lo, hi) = value.split_once("..").ok_or_else(bad)?;
@@ -261,14 +276,18 @@ impl Level {
         self.height
     }
 
-    /// Where the protagonist appears.
+    /// Where the protagonist appears, just outside the entry door.
     pub fn start(&self) -> Pos {
         self.start
     }
 
-    /// Stepping onto it ends the level.
+    /// Stepping onto it ends the level; just outside the exit door.
     pub fn finish(&self) -> Pos {
         self.finish
+    }
+
+    pub fn entry(&self) -> Pos {
+        self.entry
     }
 
     pub fn exit(&self) -> Pos {
@@ -277,6 +296,16 @@ impl Level {
 
     pub fn turnstile(&self) -> Option<Turnstile> {
         self.turnstile
+    }
+
+    /// Whether the entry door is open at global time `t`.
+    pub fn entry_open_at(&self, t: i32) -> bool {
+        self.entry_closes.is_none_or(|closes| t < closes)
+    }
+
+    /// Global time from which the entry door is closed, if it ever closes.
+    pub fn entry_closes(&self) -> Option<i32> {
+        self.entry_closes
     }
 
     /// Whether the exit door is open at global time `t`.
@@ -330,6 +359,7 @@ mod tests {
         assert_eq!(Level::parse("S..XF"), Err(ParseError::NeedsExactlyOne { tile: "entry door (E)", found: 0 }));
         assert_eq!(Level::parse("SEr_bXF"), Err(ParseError::BadTurnstile)); // one interior cell
         assert_eq!(Level::parse("SEr___bXF"), Err(ParseError::BadTurnstile)); // three interior cells
+        assert_eq!(Level::parse("SErbXF"), Err(ParseError::BadTurnstile)); // no interior
         assert_eq!(Level::parse("SEr__XF"), Err(ParseError::BadTurnstile)); // no blue door
         assert!(matches!(Level::parse("SE.XF\n\nfoo: 1"), Err(ParseError::BadProperty { .. })));
         assert!(matches!(Level::parse("SE.XF\n\ntimeline: 5..1"), Err(ParseError::BadProperty { .. })));
@@ -352,6 +382,11 @@ mod tests {
         assert!(turnstile.crosses_mirror(Pos::new(4, 0), Pos::new(3, 0)));
         assert!(!turnstile.crosses_mirror(Pos::new(2, 0), Pos::new(3, 0)));
         assert!(level.exit_open_at(8) && !level.exit_open_at(9));
+        let wide = Level::parse("SEr____bXF\n\nentry-closes: 3").unwrap();
+        let t = wide.turnstile().unwrap();
+        assert_eq!((t.red_cell, t.blue_cell), (Pos::new(4, 0), Pos::new(5, 0))); // the mirror is halfway
+        assert!(t.is_inside(Pos::new(3, 0)) && t.is_inside(Pos::new(6, 0)) && !t.is_inside(Pos::new(7, 0)));
+        assert!(wide.entry_open_at(2) && !wide.entry_open_at(3));
         assert_eq!(level.timeline(), (-2, 22));
         let plain = Level::parse("SE.XF").unwrap();
         assert_eq!((plain.turnstile(), plain.exit_open_at(1000), plain.timeline()), (None, true, DEFAULT_TIMELINE));
@@ -360,9 +395,9 @@ mod tests {
     #[test]
     fn bundled_level_parses() {
         let level = Level::parse(crate::levels::FREEPORT).unwrap();
-        assert_eq!((level.start(), level.finish()), (Pos::new(0, 6), Pos::new(16, 2)));
-        assert_eq!(level.exit(), Pos::new(15, 2));
+        assert_eq!((level.start(), level.finish()), (Pos::new(0, 6), Pos::new(15, 2)));
+        assert_eq!(level.exit(), Pos::new(14, 2));
         assert_eq!(level.turnstile().map(|t| (t.red_cell, t.blue_cell)), Some((Pos::new(7, 4), Pos::new(8, 4))));
-        assert_eq!(level.exit_closes(), Some(9));
+        assert_eq!((level.entry_closes(), level.exit_closes()), (Some(3), Some(3)));
     }
 }

@@ -9,5 +9,7 @@ pub mod game;
 pub mod level;
 pub mod levels;
 pub mod paint;
+pub mod session;
+pub mod solver;
 pub mod title;
 pub mod view;

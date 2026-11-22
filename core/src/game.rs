@@ -4,15 +4,17 @@
 //! Game state and rules: worldlines, arrows of time, and the turnstile.
 //!
 //! Every move advances the protagonist's own (proper) time by one, and global time by one in the
-//! direction of their arrow: +1 forward, −1 inverted. Crossing the turnstile's mirror (between its
-//! two interior cells) reverses the arrow and takes no global time: at that instant both selves
-//! exist, one on each side of the mirror. The turnstile's doors are closed whenever anyone is
-//! inside. The protagonist's history is a worldline made of segments, one per stretch between
+//! direction of their arrow: +1 forward, −1 inverted. Crossing the turnstile's mirror (between the
+//! two halves of its interior) moves the frontier of consciousness to the other side and reverses
+//! the arrow without advancing global time; the next move runs in the new direction. The cells
+//! on either side of the mirror are trapdoors: each turnstile door is closed while anyone stands
+//! on the trapdoor on its side. A door can only be walked through while it is open, both now and
+//! on arrival. The protagonist's history is a worldline made of segments, one per stretch between
 //! inversions; earlier segments replay as other selves at whatever global time it is.
 //!
 //! Consistency is lenient for now: past selves are not obstacles, and what they saw isn't checked.
 
-use crate::level::{Level, Pos, Tile};
+use crate::level::{Level, Pos, Side, Tile};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dir {
@@ -34,7 +36,7 @@ impl Dir {
 }
 
 /// A self's arrow of time.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Arrow {
     Forward,
     Inverted,
@@ -107,7 +109,7 @@ pub enum StepOutcome {
     Inverted,
     /// The move was not possible; no time passes.
     Blocked,
-    /// The protagonist stepped onto the finish and left the level.
+    /// The protagonist stepped onto the finish: the level is over.
     Exited,
 }
 
@@ -161,21 +163,51 @@ impl Game {
         self.status
     }
 
-    /// Every self present at global time `t`.
+    /// Every self present at global time `t`; the active one is the self being controlled now.
     pub fn selves_at(&self, t: i32) -> Vec<SelfAt> {
-        let last = self.segments.len() - 1;
+        self.selves_controlled(t, self.segments.len() - 1)
+    }
+
+    /// Every self present at global time `t`, with the self of segment `controlled` as the active
+    /// one (for replays, which follow the frontier of consciousness through earlier segments).
+    pub fn selves_controlled(&self, t: i32, controlled: usize) -> Vec<SelfAt> {
         self.segments
             .iter()
             .enumerate()
-            .filter_map(|(i, s)| s.pos_at(t).map(|pos| SelfAt { pos, arrow: s.arrow, active: i == last }))
+            .filter_map(|(i, s)| s.pos_at(t).map(|pos| SelfAt { pos, arrow: s.arrow, active: i == controlled }))
             .collect()
     }
 
-    /// Whether the turnstile's doors are open at global time `t`: they are closed while anyone is
-    /// inside.
-    pub fn turnstile_open_at(&self, t: i32) -> bool {
+    /// The frontier of consciousness through the whole worldline, in the protagonist's own order:
+    /// the global time and segment of every position they occupied, from the start to now.
+    pub fn consciousness(&self) -> Vec<(i32, usize)> {
+        self.segments
+            .iter()
+            .enumerate()
+            .flat_map(|(i, s)| (0..s.path.len()).map(move |k| (s.start + k as i32 * s.arrow.dt(), i)))
+            .collect()
+    }
+
+    /// Whether the turnstile door on `side` is open at global time `t`: it is closed while anyone
+    /// stands on the trapdoor on its side of the mirror.
+    pub fn turnstile_door_open_at(&self, side: Side, t: i32) -> bool {
         let Some(turnstile) = self.level.turnstile() else { return true };
-        !self.segments.iter().filter_map(|s| s.pos_at(t)).any(|pos| turnstile.is_inside(pos))
+        let trapdoor = match side {
+            Side::Red => turnstile.red_cell,
+            Side::Blue => turnstile.blue_cell,
+        };
+        !self.segments.iter().any(|s| s.pos_at(t) == Some(trapdoor))
+    }
+
+    /// Every door and whether it is open at global time `t`: the entry and exit doors, then the
+    /// turnstile's doors.
+    pub fn doors_at(&self, t: i32) -> Vec<(Pos, bool)> {
+        let mut doors = vec![(self.level.entry(), self.level.entry_open_at(t)), (self.level.exit(), self.level.exit_open_at(t))];
+        if let Some(turnstile) = self.level.turnstile() {
+            doors.push((turnstile.red_door, self.turnstile_door_open_at(Side::Red, t)));
+            doors.push((turnstile.blue_door, self.turnstile_door_open_at(Side::Blue, t)));
+        }
+        doors
     }
 
     pub fn step(&mut self, dir: Dir) -> StepOutcome {
@@ -185,10 +217,16 @@ impl Game {
         let from = self.player();
         let target = dir.offset(from);
         let crossing = self.level.turnstile().is_some_and(|t| t.crosses_mirror(from, target));
-        let arrival = if crossing { self.now() } else { self.now() + self.arrow().dt() };
+        let now = self.now();
+        // Crossing the mirror moves the frontier of consciousness without advancing global time.
+        let arrow = if crossing { self.arrow().reversed() } else { self.arrow() };
+        let arrival = if crossing { now } else { now + arrow.dt() };
         let walkable = match self.level.tile(target) {
-            Some(Tile::Exit) => self.level.exit_open_at(arrival),
-            Some(Tile::TurnstileDoor(_)) => self.turnstile_open_at(arrival),
+            // A door must be open now and when you'd arrive: walking into a closed door is not a
+            // move, and doors never open because someone walks into them.
+            Some(Tile::Entry) => [now, arrival].iter().all(|&t| self.level.entry_open_at(t)),
+            Some(Tile::Exit) => [now, arrival].iter().all(|&t| self.level.exit_open_at(t)),
+            Some(Tile::TurnstileDoor(side)) => [now, arrival].iter().all(|&t| self.turnstile_door_open_at(side, t)),
             Some(tile) => tile.is_walkable(),
             None => false,
         };
@@ -198,7 +236,6 @@ impl Game {
 
         self.moves += 1;
         if crossing {
-            let arrow = self.arrow().reversed();
             self.segments.push(Segment { arrow, start: arrival, path: vec![target] });
             return StepOutcome::Inverted;
         }
@@ -253,85 +290,90 @@ mod tests {
         assert_eq!((g.moves(), g.now()), (2, 2));
     }
 
+    /// S E r _ _ | _ _ b . X F: the mirror lies between x = 4 and x = 5.
+    const BOOTH: &str = "SEr____b.XF";
+
     #[test]
     fn crossing_the_mirror_reverses_the_arrow_without_spending_global_time() {
-        let mut g = game("SEr__b.XF");
-        let outcomes = play(&mut g, "dddd");
-        assert_eq!(outcomes, [StepOutcome::Moved, StepOutcome::Moved, StepOutcome::Moved, StepOutcome::Inverted]);
-        assert_eq!((g.arrow(), g.now(), g.player(), g.segments().len()), (Arrow::Inverted, 3, Pos::new(4, 0), 2));
+        let mut g = game(BOOTH);
+        let outcomes = play(&mut g, "ddddd");
+        assert_eq!(outcomes[4], StepOutcome::Inverted);
+        assert_eq!((g.arrow(), g.now(), g.player(), g.segments().len()), (Arrow::Inverted, 4, Pos::new(5, 0), 2));
         play(&mut g, "dd");
-        assert_eq!((g.now(), g.moves()), (1, 6)); // two inverted moves took global time back to 1
+        assert_eq!((g.now(), g.moves()), (2, 7)); // two inverted moves took global time back to 2
         assert_eq!(
             g.segments()[1],
-            Segment { arrow: Arrow::Inverted, start: 3, path: vec![Pos::new(4, 0), Pos::new(5, 0), Pos::new(6, 0)] }
+            Segment { arrow: Arrow::Inverted, start: 4, path: vec![Pos::new(5, 0), Pos::new(6, 0), Pos::new(7, 0)] }
         );
-        assert_eq!(g.segments()[1].span(), (1, 3));
+        assert_eq!(g.segments()[1].span(), (2, 4));
     }
 
     #[test]
-    fn at_the_inversion_both_selves_stand_on_either_side_of_the_mirror() {
-        let mut g = game("SEr__b.XF");
-        play(&mut g, "dddd");
-        assert_eq!(
-            g.selves_at(3),
-            [
-                SelfAt { pos: Pos::new(3, 0), arrow: Arrow::Forward, active: false },
-                SelfAt { pos: Pos::new(4, 0), arrow: Arrow::Inverted, active: true },
-            ]
-        );
+    fn each_turnstile_door_is_closed_while_its_trapdoor_is_occupied() {
+        let mut g = game(BOOTH);
+        play(&mut g, "dddd"); // on the red trapdoor at t = 4
+        assert!(!g.turnstile_door_open_at(Side::Red, 4) && g.turnstile_door_open_at(Side::Blue, 4));
+        play(&mut g, "d"); // across, onto the blue trapdoor at the same t = 4
+        assert!(!g.turnstile_door_open_at(Side::Red, 4) && !g.turnstile_door_open_at(Side::Blue, 4));
+        assert!(g.turnstile_door_open_at(Side::Red, 3) && g.turnstile_door_open_at(Side::Blue, 3));
+        assert_eq!(play(&mut g, "dd"), [StepOutcome::Moved, StepOutcome::Moved]); // off it and out
     }
 
     #[test]
-    fn turnstile_doors_close_while_anyone_is_inside() {
-        let mut g = game("SEr__b.XF");
-        play(&mut g, "dddd"); // inside at t = 3, inverted
-        assert!(g.turnstile_open_at(2) && !g.turnstile_open_at(3) && g.turnstile_open_at(4));
-        assert_eq!(g.step(East), StepOutcome::Moved); // out of the blue door at t = 2: open again
-        // A forward self can't get in while an earlier self is inside.
-        let mut g = game("SEr__b.XF");
-        play(&mut g, "ddddaa"); // inverted at t = 3, then back across: forward again, still at t = 3
-        assert_eq!(g.arrow(), Arrow::Forward);
-        assert!(!g.turnstile_open_at(3));
+    fn doors_must_be_open_now_and_on_arrival() {
+        // Arriving at t = 3 when the exit closes at 3.
+        let mut g = game("SE.XF\n\nexit-closes: 3");
+        assert_eq!(play(&mut g, "ddd"), [StepOutcome::Moved, StepOutcome::Moved, StepOutcome::Blocked]);
+        // Inverted next to the exit at t = 4: open on arrival (t = 3) but not now, so blocked.
+        let mut g = game("SE...r____b.XF\n\nexit-closes: 4");
+        play(&mut g, "dddddddd"); // across the mirror at t = 7
+        play(&mut g, "ddd"); // out of the blue door, next to the exit at t = 4
+        assert_eq!((g.player(), g.now()), (Pos::new(11, 0), 4));
+        assert_eq!(g.step(East), StepOutcome::Blocked);
+        play(&mut g, "ad"); // wait two moves: now t = 2
+        assert_eq!(play(&mut g, "dd"), [StepOutcome::Moved, StepOutcome::Exited]);
     }
 
     #[test]
     fn earlier_selves_replay_at_the_current_time() {
-        let mut g = game("SEr__b.XF");
-        play(&mut g, "dddddd"); // inverted at t = 3, now at t = 1
+        let mut g = game(BOOTH);
+        play(&mut g, "ddddddd"); // inverted, on the blue door at t = 2
         assert_eq!(
-            g.selves_at(1),
+            g.selves_at(2),
             [
-                SelfAt { pos: Pos::new(1, 0), arrow: Arrow::Forward, active: false }, // forward self, entering
-                SelfAt { pos: Pos::new(6, 0), arrow: Arrow::Inverted, active: true },
+                SelfAt { pos: Pos::new(2, 0), arrow: Arrow::Forward, active: false }, // the forward self, on the red door
+                SelfAt { pos: Pos::new(7, 0), arrow: Arrow::Inverted, active: true },
             ]
         );
         assert!(g.selves_at(-5).is_empty());
     }
 
     #[test]
-    fn the_exit_door_only_lets_you_through_while_it_is_open_and_the_finish_ends_the_level() {
-        let mut g = game("SE.XF\n\nexit-closes: 3");
-        assert_eq!(play(&mut g, "ddd"), [StepOutcome::Moved, StepOutcome::Moved, StepOutcome::Blocked]);
+    fn consciousness_follows_the_protagonist_through_the_inversion() {
+        let mut g = game(BOOTH);
+        play(&mut g, "ddddddd");
+        let c = g.consciousness();
+        assert_eq!(c.len(), 8); // every position held, in the protagonist's own order
+        assert_eq!((c[0], c[4], c[5], c[7]), ((0, 0), (4, 0), (4, 1), (2, 1)));
+    }
+
+    #[test]
+    fn the_finish_ends_the_level() {
         let mut g = game("SE.XF\n\nexit-closes: 4");
-        assert_eq!(play(&mut g, "dddd"), [StepOutcome::Moved, StepOutcome::Moved, StepOutcome::Moved, StepOutcome::Exited]);
+        assert_eq!(play(&mut g, "dddd").last(), Some(&StepOutcome::Exited));
         assert_eq!(g.status(), Status::Exited);
         assert_eq!(g.step(West), StepOutcome::Blocked);
     }
 
     #[test]
-    fn solution_inverts_and_leaves_through_the_door_before_it_closed() {
+    fn perfect_play_is_a_palindrome() {
         let mut g = Game::new(Level::parse(crate::levels::FREEPORT).unwrap());
-        // In through the entry door, up to the glass, and watch the exit door close at t = 9.
-        assert!(play(&mut g, "dddddwwwwdd").iter().all(|&o| o == StepOutcome::Moved));
-        assert_eq!((g.player(), g.now()), (Pos::new(7, 2), 11));
-        assert!(!g.level().exit_open_at(g.now()));
-        // Back to the turnstile, in, and across the mirror.
-        play(&mut g, "aass");
-        assert_eq!(play(&mut g, "ddd"), [StepOutcome::Moved, StepOutcome::Moved, StepOutcome::Inverted]);
-        assert_eq!((g.player(), g.now(), g.arrow()), (Pos::new(8, 4), 17, Arrow::Inverted));
-        // Inverted: out of the blue door and up to the exit, global time running backward.
-        let outcomes = play(&mut g, "ddddddwwdd");
+        let outcomes = play(&mut g, "ddwwdddddddddwwdddd");
         assert_eq!(outcomes.last(), Some(&StepOutcome::Exited));
-        assert_eq!((g.now(), g.moves()), (7, 28));
+        // 9 moves to the mirror, the crossing, 9 inverted moves out: back at t = 0 on the finish,
+        // while the forward self stands on the start.
+        assert_eq!((g.now(), g.moves(), g.segments().len()), (0, 19, 2));
+        assert_eq!(g.segments()[0].path[0], g.level().start());
+        assert_eq!(g.player(), g.level().finish());
     }
 }

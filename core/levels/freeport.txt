@@ -1,12 +1,13 @@
- WWWWWWWWWWWWWWW
- W......g......W
- W......g......XF
- W....TTTT.....W
- W....r__b.....W
- W....TTTT.....W
-SE......g......W
- W......g......W
- WWWWWWWWWWWWWWW
+ WWWWWWWWWWWWWW
+ W......g.....W
+ W......g.....XF
+ W...TTTTTT...W
+ W...r____b...W
+ W...TTTTTT...W
+SE......g.....W
+ W......g.....W
+ WWWWWWWWWWWWWW
 
-exit-closes: 9
-timeline: -2..22
+entry-closes: 3
+exit-closes: 3
+timeline: -2..12
