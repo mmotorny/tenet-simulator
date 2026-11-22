@@ -12,7 +12,7 @@ A simulator of strong determinism and time inversion, inspired by Nolan's *Tenet
 - `core/` (`tenet-core`): level parsing, game rules, and a renderer-agnostic view (rows of glyph + color). No I/O and no dependencies, so it compiles to WebAssembly.
 - `core/levels/`: level maps, one character per cell (legend in `core/src/level.rs`), bundled via `core/src/levels.rs`.
 - `cli/` (`tenet-cli`, binary `tenet`): terminal front end built on crossterm.
-- `web/` (`tenet-web`): wasm-bindgen wrapper (`src/`) and the static page (`www/`). `./build-web.sh` builds it; CI deploys it to GitHub Pages under an unguessable path while the repo is private (see `.github/workflows/pages.yml`).
+- `web/` (`tenet-web`): wasm-bindgen wrapper (`src/`) and the static page (`www/`). `./build-web.sh` builds it; CI deploys it to https://mmotorny.github.io/tenet-simulator/ (see `.github/workflows/pages.yml`).
 
 Commands:
 - `cargo run` — play interactively (arrows / wasd / hjkl, `q` to quit).
@@ -66,6 +66,7 @@ Commands:
 ## Working agreements
 
 - When pasting rendered diagrams into chat, show the real glyphs. Never substitute placeholder marks (e.g. `_` for the blank open-door glyph `⠀`); describe invisible things in prose instead.
+- The web page is just a terminal emulator: it shows exactly the screen the CLI shows (`view::screen` in the core), one fixed-width cell per glyph. No extra web decoration — any decoration must be textual and shared with the terminal.
 - Diagrams must stay readable as plain text: the CLI honors `NO_COLOR`, and glyphs (not just color) distinguish forward from inverted.
 - Licensed BSD-3-Clause (`LICENSE`). Every source file starts with SPDX headers:
   `// SPDX-License-Identifier: BSD-3-Clause` and `// SPDX-FileCopyrightText: 2026 Maksym Motorny`.

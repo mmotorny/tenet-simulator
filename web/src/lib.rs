@@ -54,32 +54,25 @@ impl WebGame {
         self.game.status() == Status::Exited
     }
 
-    /// Row of the exit door, where the page shows the time label.
-    #[wasm_bindgen(js_name = labelRow)]
-    pub fn label_row(&self) -> u32 {
-        self.level.exit().y as u32
-    }
-
-    /// The map as text, rows separated by newlines.
-    pub fn glyphs(&self) -> String {
-        view::to_plain_text(&view::render(&self.game))
-    }
-
-    /// One color code per glyph, laid out exactly like [`Self::glyphs`]:
-    /// `r` red, `b` blue, `g` glass, `w` wall, `f` floor, `d` door, `.` none.
-    pub fn colors(&self) -> String {
-        view::render(&self.game)
+    /// The whole screen, exactly as the terminal shows it. Rows are separated by newlines; each
+    /// glyph is followed by its color code: `r` red, `b` blue, `g` glass, `w` wall, `f` floor,
+    /// `d` door, `.` default.
+    pub fn screen(&self, hint: &str, exit_hint: &str) -> String {
+        view::screen(&self.game, hint, exit_hint)
             .iter()
             .map(|row| {
                 row.iter()
-                    .map(|g| match g.color {
-                        Some(Color::Red) => 'r',
-                        Some(Color::Blue) => 'b',
-                        Some(Color::Glass) => 'g',
-                        Some(Color::Wall) => 'w',
-                        Some(Color::Floor) => 'f',
-                        Some(Color::Door) => 'd',
-                        None => '.',
+                    .flat_map(|g| {
+                        let code = match g.color {
+                            Some(Color::Red) => 'r',
+                            Some(Color::Blue) => 'b',
+                            Some(Color::Glass) => 'g',
+                            Some(Color::Wall) => 'w',
+                            Some(Color::Floor) => 'f',
+                            Some(Color::Door) => 'd',
+                            None => '.',
+                        };
+                        [g.ch, code]
                     })
                     .collect::<String>()
             })
@@ -93,11 +86,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn glyphs_and_colors_line_up() {
+    fn screen_pairs_each_glyph_with_a_color() {
         let game = WebGame::new().unwrap();
-        let glyphs: Vec<usize> = game.glyphs().lines().map(|l| l.chars().count()).collect();
-        let colors: Vec<usize> = game.colors().lines().map(|l| l.chars().count()).collect();
-        assert_eq!(glyphs, colors);
+        let screen = game.screen("hint", "");
+        let rows: Vec<Vec<char>> = screen.split('\n').map(|r| r.chars().collect()).collect();
+        assert!(rows.iter().all(|r| r.len() % 2 == 0));
+        assert_eq!(rows[0][..4], ['┏', 'w', '━', 'w']);
+        let last: String = rows.last().unwrap().iter().step_by(2).collect();
+        assert_eq!(last, "hint");
     }
 
     #[test]

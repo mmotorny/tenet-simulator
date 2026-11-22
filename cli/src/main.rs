@@ -17,7 +17,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifier
 use crossterm::{cursor, execute, queue, terminal};
 use tenet_core::game::{Dir, Game, Status, StepOutcome};
 use tenet_core::level::Level;
-use tenet_core::view::{self, Color, Glyph};
+use tenet_core::view::{self, Color};
 
 const DEFAULT_LEVEL: &str = tenet_core::levels::FREEPORT;
 
@@ -72,42 +72,20 @@ fn paint(out: &mut String, text: &str, color: Option<Color>, enabled: bool) {
     }
 }
 
-/// The map plus status, as lines of (optionally colored) text.
+/// The screen (map, time label, status) as lines of optionally colored text.
 fn frame_lines(game: &Game, color: bool) -> Vec<String> {
-    let rows = view::render(game);
-    let label_row = game.level().exit().y as usize;
-    let mut lines: Vec<String> = rows
+    view::screen(game, "arrows / wasd / hjkl move · q quit", "")
         .iter()
-        .enumerate()
-        .map(|(y, row)| {
+        .map(|row| {
             let mut line = String::new();
-            let mut prev: Option<Glyph> = None;
-            let mut run = String::new();
             // Group runs of the same color to keep escape sequences short.
-            for g in row {
-                if prev.is_some_and(|p| p.color != g.color) {
-                    paint(&mut line, &run, prev.unwrap().color, color);
-                    run.clear();
-                }
-                run.push(g.ch);
-                prev = Some(*g);
-            }
-            if let Some(p) = prev {
-                paint(&mut line, &run, p.color, color);
-            }
-            if y == label_row {
-                line.push_str("    ");
-                paint(&mut line, &format!("t = {} ▲", game.turn()), Some(Color::Red), color);
+            for run in row.chunk_by(|a, b| a.color == b.color) {
+                let text: String = run.iter().map(|g| g.ch).collect();
+                paint(&mut line, &text, run[0].color, color);
             }
             line
         })
-        .collect();
-    lines.push(String::new());
-    lines.push(match game.status() {
-        Status::Playing => "arrows / wasd / hjkl move · q quit".to_string(),
-        Status::Exited => format!("You walked out of the exit door in {} moves.", game.turn()),
-    });
-    lines
+        .collect()
 }
 
 fn dir_for_char(ch: char) -> Option<Dir> {

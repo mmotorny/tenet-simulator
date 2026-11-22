@@ -1,80 +1,90 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // SPDX-FileCopyrightText: 2026 Maksym Motorny
 
+// The page is a minimal terminal emulator: it shows the same screen as the terminal front end,
+// with every glyph in its own fixed-width cell so rows line up whatever fonts the browser picks.
+
 import init, { WebGame } from "./pkg/tenet_web.js";
 
+const HINT = "arrows / wasd / hjkl / swipe move · r restart";
+const EXIT_HINT = " · r restart";
 const COLOR_CLASSES = { r: "red", b: "blue", g: "glass", w: "wall", f: "floor", d: "door" };
-
 const KEYS = {
   ArrowUp: "north", w: "north", k: "north",
   ArrowDown: "south", s: "south", j: "south",
   ArrowRight: "east", d: "east", l: "east",
   ArrowLeft: "west", a: "west", h: "west",
 };
+const SWIPE_MIN_PX = 24;
 
-const map = document.getElementById("map");
-const status = document.getElementById("status");
+const term = document.getElementById("term");
 
-function span(text, cls) {
-  const el = document.createElement("span");
-  el.textContent = text;
-  if (cls) el.className = cls;
-  return el;
-}
-
-function draw(game) {
-  const glyphRows = game.glyphs().split("\n");
-  const colorRows = game.colors().split("\n");
-  const labelRow = game.labelRow();
-  map.replaceChildren();
-  glyphRows.forEach((row, y) => {
-    const glyphs = [...row];
-    const colors = colorRows[y];
-    // Group runs of the same color into one span.
-    let start = 0;
-    for (let x = 1; x <= glyphs.length; x++) {
-      if (x === glyphs.length || colors[x] !== colors[start]) {
-        map.append(span(glyphs.slice(start, x).join(""), COLOR_CLASSES[colors[start]]));
-        start = x;
+function show(screen) {
+  term.replaceChildren(
+    ...screen.split("\n").map((encoded) => {
+      const row = document.createElement("div");
+      const chars = [...encoded];
+      for (let i = 0; i + 1 < chars.length; i += 2) {
+        const cell = document.createElement("span");
+        cell.textContent = chars[i];
+        const color = COLOR_CLASSES[chars[i + 1]];
+        if (color) cell.className = color;
+        row.append(cell);
       }
-    }
-    if (y === labelRow) map.append(span(`    t = ${game.turn()} ▲`, "red"));
-    map.append("\n");
-  });
-  status.textContent = game.exited()
-    ? `You walked out of the exit door in ${game.turn()} moves. Press R to play again.`
-    : "";
+      return row;
+    }),
+  );
 }
 
 async function main() {
   await init();
   const game = new WebGame();
-
+  const draw = () => show(game.screen(HINT, EXIT_HINT));
   const move = (dir) => {
-    if (game.exited()) return;
-    game.step(dir);
-    draw(game);
+    if (!game.exited()) {
+      game.step(dir);
+      draw();
+    }
+  };
+  const restart = () => {
+    game.reset();
+    draw();
   };
 
   document.addEventListener("keydown", (event) => {
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
     if (key === "r") {
-      game.reset();
-      draw(game);
+      restart();
     } else if (KEYS[key]) {
       event.preventDefault();
       move(KEYS[key]);
     }
   });
-  for (const button of document.querySelectorAll("#pad button")) {
-    button.addEventListener("click", () => move(button.dataset.dir));
-  }
 
-  draw(game);
+  // Touch: swipe to move; tap after leaving to restart.
+  let touchStart = null;
+  document.addEventListener("touchstart", (e) => {
+    touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  }, { passive: true });
+  document.addEventListener("touchend", (e) => {
+    if (!touchStart) return;
+    const dx = e.changedTouches[0].clientX - touchStart.x;
+    const dy = e.changedTouches[0].clientY - touchStart.y;
+    touchStart = null;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE_MIN_PX) {
+      if (game.exited()) restart();
+    } else if (Math.abs(dx) > Math.abs(dy)) {
+      move(dx > 0 ? "east" : "west");
+    } else {
+      move(dy > 0 ? "south" : "north");
+    }
+  });
+
+  draw();
 }
 
 main().catch((error) => {
-  status.textContent = `Failed to start: ${error}`;
+  term.textContent = `failed to start: ${error}`;
   console.error(error);
 });

@@ -7,7 +7,7 @@ A puzzle simulator of strong determinism and time inversion, inspired by Christo
 
 The world is a 2D top-down grid with discrete time and space, played on hand-designed levels. It runs in the terminal and in the browser from one shared Rust core.
 
-**Play in the browser:** https://mmotorny.github.io/tenet-simulator/4f357ccef236ef632a6d7ac18616223c09b29869ebd29443632b86a71370ae2b/
+**Play in the browser:** https://mmotorny.github.io/tenet-simulator/
 
 ```
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
@@ -45,7 +45,7 @@ Red always means forward in time and blue means inverted.
 | `R` | restart (web) |
 | `Q` / `Esc` | quit (terminal) |
 
-On touch screens the web version shows an on-screen pad.
+On touch screens, swipe to move and tap to restart after leaving the room.
 
 ## Build and run: terminal
 
@@ -90,7 +90,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `core/` | Deterministic core: levels, rules, and a renderer-agnostic view. No I/O, no dependencies. |
 | `core/levels/` | Level maps, one character per cell (legend in `core/src/level.rs`). |
 | `cli/` | Terminal front end (crossterm). |
-| `web/` | WebAssembly bindings (`src/`) and the static page (`www/`). |
+| `web/` | WebAssembly bindings (`src/`) and the static page (`www/`): a minimal terminal emulator showing the same screen as the CLI. |
 
 Every push to `main` is tested, built and deployed to GitHub Pages by `.github/workflows/pages.yml`.
 

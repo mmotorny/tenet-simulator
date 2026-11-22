@@ -9,22 +9,7 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <main>
-      <h1>Tenet Simulator</h1>
-      <p class="hint">Walk out of the exit door on the east side.</p>
-      <pre id="map" aria-label="Level map" tabindex="0"></pre>
-      <p id="status" aria-live="polite"></p>
-      <div id="pad" aria-label="Movement controls">
-        <button data-dir="north" aria-label="North">▲</button>
-        <button data-dir="west" aria-label="West">◀</button>
-        <button data-dir="south" aria-label="South">▼</button>
-        <button data-dir="east" aria-label="East">▶</button>
-      </div>
-      <p class="keys">
-        <kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> / <kbd>WASD</kbd> / <kbd>HJKL</kbd> move ·
-        <kbd>R</kbd> restart
-      </p>
-    </main>
+    <div id="term" role="img" aria-label="Tenet Simulator"></div>
     <script type="module" src="main.js"></script>
   </body>
 </html>

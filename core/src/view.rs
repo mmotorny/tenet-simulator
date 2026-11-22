@@ -7,7 +7,7 @@
 //! roughly square in a terminal. Separators continue horizontal lines (walls, turnstile frame) and
 //! are blank otherwise. Front ends only have to map [`Color`] to real colors.
 
-use crate::game::Game;
+use crate::game::{Game, Status};
 use crate::level::{Pos, Tile};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -164,6 +164,27 @@ pub fn render(game: &Game) -> Vec<Vec<Glyph>> {
         .collect()
 }
 
+fn text(s: &str, color: Option<Color>) -> Vec<Glyph> {
+    s.chars().map(|ch| Glyph { ch, color }).collect()
+}
+
+/// The whole screen every front end shows: the map with the time label beside the exit row,
+/// a blank line, and a status line. `hint` is shown while playing; `exit_hint` is appended to
+/// the message shown after leaving through the exit door.
+pub fn screen(game: &Game, hint: &str, exit_hint: &str) -> Vec<Vec<Glyph>> {
+    let mut rows = render(game);
+    let label_row = game.level().exit().y as usize;
+    rows[label_row].extend(text("    ", None));
+    rows[label_row].extend(text(&format!("t = {} ▲", game.turn()), Some(Color::Red)));
+    rows.push(Vec::new());
+    let status = match game.status() {
+        Status::Playing => hint.to_string(),
+        Status::Exited => format!("You walked out of the exit door in {} moves.{exit_hint}", game.turn()),
+    };
+    rows.push(text(&status, None));
+    rows
+}
+
 /// The rendered view as plain text, one line per row.
 pub fn to_plain_text(rows: &[Vec<Glyph>]) -> String {
     rows.iter().map(|row| row.iter().map(|g| g.ch).collect::<String>()).collect::<Vec<_>>().join("\n")
@@ -188,6 +209,22 @@ mod tests {
 ┃ · · · · · · ⋮ · · · · · · ┃
 ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━┛";
         assert_eq!(to_plain_text(&render(&game)), expected);
+    }
+
+    #[test]
+    fn screen_adds_time_label_and_status() {
+        let mut game = Game::new(Level::parse(crate::levels::FREEPORT).unwrap());
+        let text = to_plain_text(&screen(&game, "move!", " again?"));
+        let lines: Vec<&str> = text.lines().collect();
+        assert!(lines[2].ends_with("⠀    t = 0 ▲"));
+        assert_eq!(&lines[9..], ["", "move!"]);
+
+        use crate::game::Dir::*;
+        for dir in [[East; 4].as_slice(), &[North; 2], &[East; 9], &[North; 2], &[East]].concat() {
+            game.step(dir);
+        }
+        let text = to_plain_text(&screen(&game, "move!", " again?"));
+        assert!(text.ends_with("You walked out of the exit door in 18 moves. again?"));
     }
 
     #[test]
