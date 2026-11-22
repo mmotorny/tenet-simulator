@@ -39,6 +39,7 @@ Without color, inverted selves are drawn as diamonds (`◆` / `◇`).
 | Arrows or `WASD` | move |
 | `U` | undo |
 | `R` | restart |
+| `?` | show or hide the legend |
 | `J` / `K` / `L` | after winning: rewind / pause / play the tape (again for 2×, 4×) |
 | `,` / `.` | after winning: step the tape back / forward |
 | `Space` | after winning: play or pause the tape |

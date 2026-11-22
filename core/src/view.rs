@@ -453,6 +453,56 @@ pub struct Extras<'a> {
     pub replay: Option<Replay>,
     /// Draw these rows instead of the title logo (the logo flip).
     pub title: Option<&'a [Vec<Glyph>]>,
+    /// Show the legend in place of the timeline.
+    pub legend: bool,
+}
+
+/// The legend for the map: what its symbols mean, in two columns, each symbol in its real colors.
+/// Selves are always explained; other symbols only if they're on the board.
+pub fn legend(board: &[Vec<Glyph>]) -> (Vec<Vec<Glyph>>, usize) {
+    let on_board = |ch: char| board.iter().flatten().any(|g| g.ch == ch);
+    let symbol = |pairs: &[(char, Color)]| pairs.iter().map(|&(ch, c)| Glyph::new(ch, c)).collect::<Vec<_>>();
+    // Every self is you, at some point of your own time: the filled one is the self you control.
+    // Each self entry shows both arrows of time: red forward, blue inverted.
+    let mut entries: Vec<(Vec<Glyph>, &str)> = vec![
+        (symbol(&[('●', Color::Red), (' ', Color::Hint), ('●', Color::Blue)]), "you now"),
+        (symbol(&[('○', Color::Red), (' ', Color::Hint), ('○', Color::Blue)]), "you another time"),
+    ];
+    if on_board('⋮') {
+        entries.push((symbol(&[('⋮', Color::Glass)]), "glass"));
+    }
+    if on_board(DOOR_CLOSED) || board.iter().flatten().any(|g| g.color == Some(Color::Door)) {
+        entries.push((symbol(&[(DOOR_CLOSED, Color::Door)]), "closed door"));
+    }
+    if on_board('╭') {
+        entries.push((symbol(&[('╭', Color::Red), ('─', Color::Red), ('╮', Color::Blue)]), "turnstile"));
+    }
+    if on_board(START) || on_board(FINISH) {
+        entries.push((symbol(&[(START, Color::Key), (' ', Color::Hint), (FINISH, Color::Key)]), "start, finish"));
+    }
+
+    let symbol_width = entries.iter().map(|(sym, _)| sym.len()).max().unwrap_or(0) + 2;
+    let cell = |(sym, text): &(Vec<Glyph>, &str)| {
+        let mut out = sym.clone();
+        out.resize(symbol_width, Glyph::BLANK);
+        out.extend(text.chars().map(|ch| Glyph::new(ch, Color::Hint)));
+        out
+    };
+    let cells: Vec<Vec<Glyph>> = entries.iter().map(cell).collect();
+    let column = cells.iter().map(Vec::len).max().unwrap_or(0) + 3;
+    let rows: Vec<Vec<Glyph>> = cells
+        .chunks(2)
+        .map(|pair| {
+            let mut row = pair[0].clone();
+            if let Some(second) = pair.get(1) {
+                row.resize(column, Glyph::BLANK);
+                row.extend_from_slice(second);
+            }
+            row
+        })
+        .collect();
+    let width = rows.iter().map(Vec::len).max().unwrap_or(0);
+    (rows, width)
 }
 
 /// Builds the screen. `playing` hints are shown while playing; `exited` hints follow the result
@@ -484,7 +534,7 @@ fn move_counter(game: &Game, par: Option<u32>) -> Vec<Glyph> {
 pub fn screen_with(game: &Game, playing: &[Hint], exited: &[Hint], extras: &Extras) -> Screen {
     let board = render_frame(game, extras);
     let board_width = board.first().map_or(0, Vec::len);
-    let (timeline, timeline_width) = timeline_at(game, extras.replay);
+    let (timeline, timeline_width) = if extras.legend { legend(&board) } else { timeline_at(game, extras.replay) };
     let rest = match game.status() {
         Status::Playing => playing,
         Status::Exited => exited,
@@ -822,6 +872,21 @@ mod tests {
         play(&mut game, "ddddddddd"); // across the mirror at t = 4, back to t = 0 on the finish
         let (_, width) = timeline(&game);
         assert_eq!(width, 7); // −1..5: one unit of margin around the span 0..4
+    }
+
+    #[test]
+    fn legend_explains_the_map_in_place_of_the_timeline() {
+        let game = freeport();
+        let extras = Extras { legend: true, ..Extras::default() };
+        let screen = screen_with(&game, &[], &[], &extras);
+        assert_eq!(
+            plain(&screen.timeline),
+            ["● ◆  you now            ○ ◇  you another time", "⋮    glass              ⣿    closed door", "╭─╮  turnstile          ▶ ■  start, finish"]
+        );
+        assert_eq!(screen.timeline[0][2].color, Some(Color::Blue)); // inverted: blue in color
+        // Only symbols on the board are explained.
+        let bare = Game::new(Level::parse("SE.XF").unwrap());
+        assert_eq!(plain(&legend(&render(&bare)).0), ["● ◆  you now            ○ ◇  you another time", "⣿    closed door        ▶ ■  start, finish"]);
     }
 
     #[test]

@@ -80,9 +80,10 @@ fn paint(out: &mut String, text: &str, glyph: &Glyph, enabled: bool) {
     out.push_str("\x1b[0m");
 }
 
-const PLAYING_HINTS: &[view::Hint] = &[("←↑↓→ wasd", "move"), ("u", "undo"), ("r", "restart"), ("q esc", "quit")];
+const PLAYING_HINTS: &[view::Hint] =
+    &[("←↑↓→ wasd", "move"), ("u", "undo"), ("r", "restart"), ("?", "legend"), ("q esc", "quit")];
 const EXITED_HINTS: &[view::Hint] =
-    &[("j", "rewind"), ("k", "pause"), ("l", "play"), (", .", "step"), ("u", "undo"), ("r", "restart"), ("q esc", "quit")];
+    &[("j", "rewind"), ("k", "pause"), ("l", "play"), (", .", "step"), ("u", "undo"), ("r", "restart"), ("?", "legend"), ("q esc", "quit")];
 
 fn screen(session: &Session) -> view::Screen {
     session.screen(PLAYING_HINTS, EXITED_HINTS)
@@ -226,6 +227,7 @@ fn input_for(code: KeyCode) -> Option<Input> {
         KeyCode::Char(' ') => Input::TogglePlay,
         KeyCode::Char(',') => Input::StepBack,
         KeyCode::Char('.') => Input::StepForward,
+        KeyCode::Char('?') => Input::ToggleLegend,
         KeyCode::Char(ch) => Input::Move(dir_for_char(ch)?),
         _ => return None,
     })

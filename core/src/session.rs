@@ -40,6 +40,8 @@ pub enum Input {
     StepBack,
     /// Tape: one frame toward the end.
     StepForward,
+    /// Show or hide the legend.
+    ToggleLegend,
 }
 
 /// An animation frame waiting to be shown: what it changes on screen, and for how long.
@@ -114,6 +116,7 @@ pub struct Session {
     animation: VecDeque<Frame>,
     /// Whether the tape starts rewinding once the current animation is over (after winning).
     tape_pending: bool,
+    legend: bool,
 }
 
 impl Session {
@@ -125,7 +128,7 @@ impl Session {
     /// A session with a known par, skipping the search.
     pub fn with_par(level: Level, par: Option<u32>) -> Self {
         let game = Game::new(level.clone());
-        Self { level, game, par, history: Vec::new(), tape: None, animation: VecDeque::new(), tape_pending: false }
+        Self { level, game, par, history: Vec::new(), tape: None, animation: VecDeque::new(), tape_pending: false, legend: false }
     }
 
     pub fn game(&self) -> &Game {
@@ -153,6 +156,7 @@ impl Session {
                     self.animate_doors(&before);
                 }
             }
+            Input::ToggleLegend => self.legend = !self.legend,
             Input::Restart => {
                 self.game = Game::new(self.level.clone());
                 self.history.clear();
@@ -278,6 +282,7 @@ impl Session {
             door_overrides: frame.map_or(&[], |f| f.door_overrides.as_slice()),
             replay: self.tape.as_ref().map(Tape::replay),
             title: frame.and_then(|f| f.title.as_deref()),
+            legend: self.legend,
         };
         view::screen_with(&self.game, playing, exited, &extras)
     }
@@ -384,6 +389,17 @@ mod tests {
         s.input(Input::Undo);
         assert!(!s.on_tape());
         assert_eq!((s.game().status(), s.game().moves()), (Status::Playing, 18));
+    }
+
+    #[test]
+    fn the_legend_toggles() {
+        let mut s = session();
+        let rows = |s: &Session| s.screen(&[], &[]).timeline.len();
+        let timeline = rows(&s);
+        s.input(Input::ToggleLegend);
+        assert_eq!(s.screen(&[], &[]).timeline[0][0].ch, '●');
+        s.input(Input::ToggleLegend);
+        assert_eq!(rows(&s), timeline);
     }
 
     #[test]

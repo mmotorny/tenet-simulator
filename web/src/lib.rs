@@ -14,9 +14,9 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
-const PLAYING_HINTS: &[view::Hint] = &[("←↑↓→ wasd swipe", "move"), ("u", "undo"), ("r", "restart")];
+const PLAYING_HINTS: &[view::Hint] = &[("←↑↓→ wasd swipe", "move"), ("u", "undo"), ("r", "restart"), ("?", "legend")];
 const EXITED_HINTS: &[view::Hint] =
-    &[("j", "rewind"), ("k", "pause"), ("l", "play"), (", .", "step"), ("u", "undo"), ("r", "restart")];
+    &[("j", "rewind"), ("k", "pause"), ("l", "play"), (", .", "step"), ("u", "undo"), ("r", "restart"), ("?", "legend")];
 
 /// JetBrains Mono (loaded by the page), then the GitHub monospace stack as fallback.
 const FONT_FAMILY: &str =
@@ -42,8 +42,8 @@ impl WebGame {
         Ok(Self { session: Session::new(level) })
     }
 
-    /// Feeds an input: "north", "south", "east", "west", "undo", "restart", "rewind", "pause",
-    /// "play", "toggle", "back" or "forward" (the last six control the tape after winning).
+    /// Feeds an input: "north", "south", "east", "west", "undo", "restart", "legend", or one of
+    /// the tape's "rewind", "pause", "play", "toggle", "back" and "forward" (after winning).
     pub fn input(&mut self, name: &str) -> Result<(), JsError> {
         let input = match name {
             "north" => Input::Move(Dir::North),
@@ -58,6 +58,7 @@ impl WebGame {
             "toggle" => Input::TogglePlay,
             "back" => Input::StepBack,
             "forward" => Input::StepForward,
+            "legend" => Input::ToggleLegend,
             _ => return Err(JsError::new(&format!("unknown input {name:?}"))),
         };
         self.session.input(input);

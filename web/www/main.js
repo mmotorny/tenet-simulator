@@ -14,7 +14,7 @@ const KEYS = {
   ArrowDown: "south", s: "south",
   ArrowRight: "east", d: "east",
   ArrowLeft: "west", a: "west",
-  u: "undo", r: "restart",
+  u: "undo", r: "restart", "?": "legend",
   j: "rewind", k: "pause", l: "play", " ": "toggle", ",": "back", ".": "forward",
 };
 const SWIPE_MIN_PX = 24;
