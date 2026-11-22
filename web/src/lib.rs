@@ -9,6 +9,9 @@ use tenet_core::levels;
 use tenet_core::view::{self, Color};
 use wasm_bindgen::prelude::*;
 
+const PLAYING_HINTS: &[view::Hint] = &[("←↑↓→ wasd hjkl swipe", "move"), ("r", "restart")];
+const EXITED_HINTS: &[view::Hint] = &[("r tap", "restart")];
+
 #[wasm_bindgen]
 pub struct WebGame {
     level: Level,
@@ -56,9 +59,9 @@ impl WebGame {
 
     /// The whole screen, exactly as the terminal shows it. Rows are separated by newlines; each
     /// glyph is followed by its color code: `r` red, `b` blue, `g` glass, `w` wall, `f` floor,
-    /// `d` door, `.` default.
-    pub fn screen(&self, hint: &str, exit_hint: &str) -> String {
-        view::screen(&self.game, hint, exit_hint)
+    /// `d` door, `k` key, `h` hint, `.` default.
+    pub fn screen(&self) -> String {
+        view::screen(&self.game, PLAYING_HINTS, EXITED_HINTS)
             .iter()
             .map(|row| {
                 row.iter()
@@ -70,6 +73,8 @@ impl WebGame {
                             Some(Color::Wall) => 'w',
                             Some(Color::Floor) => 'f',
                             Some(Color::Door) => 'd',
+                            Some(Color::Key) => 'k',
+                            Some(Color::Hint) => 'h',
                             None => '.',
                         };
                         [g.ch, code]
@@ -88,12 +93,12 @@ mod tests {
     #[test]
     fn screen_pairs_each_glyph_with_a_color() {
         let game = WebGame::new().unwrap();
-        let screen = game.screen("hint", "");
+        let screen = game.screen();
         let rows: Vec<Vec<char>> = screen.split('\n').map(|r| r.chars().collect()).collect();
         assert!(rows.iter().all(|r| r.len() % 2 == 0));
         assert_eq!(rows[0][..4], ['┏', 'w', '━', 'w']);
         let last: String = rows.last().unwrap().iter().step_by(2).collect();
-        assert_eq!(last, "hint");
+        assert_eq!(last, "←↑↓→ wasd hjkl swipe move · r restart");
     }
 
     #[test]

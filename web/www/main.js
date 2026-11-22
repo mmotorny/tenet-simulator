@@ -6,9 +6,9 @@
 
 import init, { WebGame } from "./pkg/tenet_web.js";
 
-const HINT = "arrows / wasd / hjkl / swipe move · r restart";
-const EXIT_HINT = " · r restart";
-const COLOR_CLASSES = { r: "red", b: "blue", g: "glass", w: "wall", f: "floor", d: "door" };
+const COLOR_CLASSES = {
+  r: "red", b: "blue", g: "glass", w: "wall", f: "floor", d: "door", k: "key", h: "hint",
+};
 const KEYS = {
   ArrowUp: "north", w: "north", k: "north",
   ArrowDown: "south", s: "south", j: "south",
@@ -39,7 +39,7 @@ function show(screen) {
 async function main() {
   await init();
   const game = new WebGame();
-  const draw = () => show(game.screen(HINT, EXIT_HINT));
+  const draw = () => show(game.screen());
   const move = (dir) => {
     if (!game.exited()) {
       game.step(dir);

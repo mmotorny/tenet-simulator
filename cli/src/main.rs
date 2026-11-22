@@ -59,6 +59,8 @@ fn rgb(color: Color) -> (u8, u8, u8) {
         Color::Wall => (140, 140, 140),
         Color::Floor => (70, 70, 70),
         Color::Door => (230, 230, 230),
+        Color::Key => (230, 230, 230),
+        Color::Hint => (110, 110, 110),
     }
 }
 
@@ -74,7 +76,7 @@ fn paint(out: &mut String, text: &str, color: Option<Color>, enabled: bool) {
 
 /// The screen (map, time label, status) as lines of optionally colored text.
 fn frame_lines(game: &Game, color: bool) -> Vec<String> {
-    view::screen(game, "arrows / wasd / hjkl move · q quit", "")
+    view::screen(game, &[("←↑↓→ wasd hjkl", "move"), ("q", "quit")], &[])
         .iter()
         .map(|row| {
             let mut line = String::new();
