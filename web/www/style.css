@@ -110,10 +110,19 @@ body {
 .ink { color: rgb(12 12 12); }
 .slab { color: rgb(240 240 240); }
 
-/* Background colors. The spread shadow bleeds a fraction of a pixel past the cell so neighbouring
-   cells join without seams at fractional cell edges. */
-.bg-slab {
-  background: rgb(240 240 240);
-  box-shadow: 0 0 0 0.4px rgb(240 240 240);
+/* Background colors, painted on a layer behind the cell that bleeds a fraction of a pixel past it
+   (like painted glyphs) so neighbouring cells join without seams at fractional cell edges. */
+#term span[class*="bg-"] {
+  position: relative;
 }
+
+#term span[class*="bg-"]::after {
+  content: "";
+  position: absolute;
+  inset: -0.4px;
+  z-index: -1;
+  background: var(--bg);
+}
+
+.bg-slab { --bg: rgb(240 240 240); }
 .hint { color: rgb(110 110 110); }

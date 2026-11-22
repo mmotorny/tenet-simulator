@@ -7,9 +7,8 @@
 
 import init, { WebGame } from "./pkg/tenet_web.js";
 
-const COLOR_CLASSES = {
-  r: "red", b: "blue", g: "glass", w: "wall", f: "floor", d: "door", k: "key", h: "hint", i: "ink", s: "slab",
-};
+// CSS class per palette index; index 0 is the default color. Mirrors PALETTE in web/src/lib.rs.
+const PALETTE_CLASSES = [null, "red", "blue", "glass", "wall", "floor", "door", "key", "hint", "ink", "slab"];
 const KEYS = {
   ArrowUp: "north", w: "north", k: "north",
   ArrowDown: "south", s: "south", j: "south",
@@ -27,13 +26,21 @@ const QUADRANTS = {
   "▛": "1110", "▜": "1101", "▙": "1011", "▟": "0111",
 };
 
-// One conic gradient paints all four quadrants as a single full-cell layer (clockwise from the
-// top: upper-right, lower-right, lower-left, upper-left). Separate half-size layers would get
-// their sizes rounded to device pixels and leave hairline seams inside the cell.
+// Quadrant blocks: one conic gradient paints all four quadrants as a single full-cell layer
+// (clockwise from the top: upper-right, lower-right, lower-left, upper-left). Separate half-size
+// layers would get their sizes rounded to device pixels and leave hairline seams inside the cell.
+// Full and half blocks are two-tone splits; a hard-stop linear gradient keeps their edges crisp.
+const SPLITS = {
+  "1111": "currentColor", "1100": "linear-gradient(currentColor 50%, transparent 50%)",
+  "0011": "linear-gradient(transparent 50%, currentColor 50%)",
+  "1010": "linear-gradient(to right, currentColor 50%, transparent 50%)",
+  "0101": "linear-gradient(to right, transparent 50%, currentColor 50%)",
+};
+
 function paintBlock(cell, mask) {
   const [ul, ur, ll, lr] = [...mask].map((bit) => (bit === "1" ? "currentColor" : "transparent"));
   cell.classList.add("block");
-  cell.style.setProperty("--quadrants", `conic-gradient(${ur} 0 25%, ${lr} 0 50%, ${ll} 0 75%, ${ul} 0)`);
+  cell.style.setProperty("--quadrants", SPLITS[mask] ?? `conic-gradient(${ur} 0 25%, ${lr} 0 50%, ${ll} 0 75%, ${ul} 0)`);
 }
 
 // Box-drawing glyphs, painted like a terminal emulator does so lines meet exactly across cells:
@@ -83,36 +90,38 @@ const title = document.getElementById("title");
 const board = document.getElementById("board");
 const status = document.getElementById("status");
 
-// Fills `el` with encoded rows: each glyph followed by its foreground and background color codes
-// (see web/src/lib.rs).
-function show(el, encodedRows) {
-  el.replaceChildren(
-    ...encodedRows.split("\n").map((encoded) => {
-      const row = document.createElement("div");
-      const chars = [...encoded];
-      for (let i = 0; i + 2 < chars.length; i += 3) {
-        const cell = document.createElement("span");
-        const mask = QUADRANTS[chars[i]];
-        const lines = lineLayers(chars[i]);
-        if (mask) paintBlock(cell, mask);
-        else if (lines) paintLines(cell, lines);
-        else if (PATHS[chars[i]]) paintPath(cell, PATHS[chars[i]]);
-        else cell.textContent = chars[i];
-        const color = COLOR_CLASSES[chars[i + 1]];
-        if (color) cell.classList.add(color);
-        const bg = COLOR_CLASSES[chars[i + 2]];
-        if (bg) cell.classList.add(`bg-${bg}`);
-        row.append(cell);
-      }
-      return row;
-    }),
-  );
+// Fills `el` with a block of cells: glyphs and their attributes in parallel arrays, indexed by
+// y * width + x (see Cells in web/src/lib.rs).
+function show(el, cells) {
+  const { width, height, chars, fg, bg } = cells;
+  cells.free();
+  const rows = [];
+  for (let y = 0; y < height; y++) {
+    const row = document.createElement("div");
+    for (let i = y * width; i < (y + 1) * width; i++) {
+      const ch = String.fromCodePoint(chars[i]);
+      const cell = document.createElement("span");
+      const mask = QUADRANTS[ch];
+      const lines = lineLayers(ch);
+      if (mask) paintBlock(cell, mask);
+      else if (lines) paintLines(cell, lines);
+      else if (PATHS[ch]) paintPath(cell, PATHS[ch]);
+      else cell.textContent = ch;
+      if (fg[i]) cell.classList.add(PALETTE_CLASSES[fg[i]]);
+      if (bg[i]) cell.classList.add(`bg-${PALETTE_CLASSES[bg[i]]}`);
+      row.append(cell);
+    }
+    rows.push(row);
+  }
+  el.replaceChildren(...rows);
 }
 
 async function main() {
   await init();
   const game = new WebGame();
-  title.style.setProperty("--width", [...game.title().split("\n")[0]].length / 3);
+  const titleCells = game.title();
+  title.style.setProperty("--width", titleCells.width);
+  titleCells.free();
   board.style.setProperty("--width", game.boardWidth());
   const draw = () => {
     show(title, game.title());

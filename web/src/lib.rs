@@ -57,14 +57,14 @@ impl WebGame {
         self.game.status() == Status::Exited
     }
 
-    /// The title logo (black letters on a white slab), encoded as described in [`encode`].
-    pub fn title(&self) -> String {
-        encode(&self.screen().title)
+    /// The title logo: black letters on a white slab.
+    pub fn title(&self) -> Cells {
+        Cells::new(&self.screen().title)
     }
 
-    /// The map with the time label, encoded as described in [`encode`].
-    pub fn board(&self) -> String {
-        encode(&self.screen().board)
+    /// The map with the time label to the right of the exit row.
+    pub fn board(&self) -> Cells {
+        Cells::new(&self.screen().board)
     }
 
     /// Width of the map alone, in cells; the page centers the board on it.
@@ -73,9 +73,9 @@ impl WebGame {
         self.screen().board_width
     }
 
-    /// The hint bar, encoded as described in [`encode`].
-    pub fn status(&self) -> String {
-        encode(std::slice::from_ref(&self.screen().status))
+    /// The hint bar.
+    pub fn status(&self) -> Cells {
+        Cells::new(std::slice::from_ref(&self.screen().status))
     }
 
     fn screen(&self) -> view::Screen {
@@ -83,29 +83,87 @@ impl WebGame {
     }
 }
 
-/// Encodes rows for the page: rows are separated by newlines, and each glyph is followed by two
-/// color codes, foreground then background: `r` red, `b` blue, `g` glass, `w` wall, `f` floor,
-/// `d` door, `k` key, `h` hint, `i` ink, `s` slab, `.` default.
-fn encode(rows: &[Vec<view::Glyph>]) -> String {
-    fn code(color: Option<Color>) -> char {
-        match color {
-            Some(Color::Red) => 'r',
-            Some(Color::Blue) => 'b',
-            Some(Color::Glass) => 'g',
-            Some(Color::Wall) => 'w',
-            Some(Color::Floor) => 'f',
-            Some(Color::Door) => 'd',
-            Some(Color::Key) => 'k',
-            Some(Color::Hint) => 'h',
-            Some(Color::Ink) => 'i',
-            Some(Color::Slab) => 's',
-            None => '.',
+/// A rectangle of cells, like a terminal emulator's cell buffer: one glyph and its attributes per
+/// cell, in parallel arrays indexed by `y * width + x`. Rows shorter than `width` are padded with
+/// blank cells.
+#[wasm_bindgen]
+pub struct Cells {
+    width: usize,
+    height: usize,
+    chars: Vec<u32>,
+    fg: Vec<u8>,
+    bg: Vec<u8>,
+}
+
+#[wasm_bindgen]
+impl Cells {
+    fn new(rows: &[Vec<view::Glyph>]) -> Self {
+        let width = rows.iter().map(Vec::len).max().unwrap_or(0);
+        let height = rows.len();
+        let mut cells = Self {
+            width,
+            height,
+            chars: vec![' ' as u32; width * height],
+            fg: vec![0; width * height],
+            bg: vec![0; width * height],
+        };
+        for (y, row) in rows.iter().enumerate() {
+            for (x, glyph) in row.iter().enumerate() {
+                let i = y * width + x;
+                cells.chars[i] = glyph.ch as u32;
+                cells.fg[i] = palette_index(glyph.color);
+                cells.bg[i] = palette_index(glyph.bg);
+            }
         }
+        cells
     }
-    rows.iter()
-        .map(|row| row.iter().flat_map(|g| [g.ch, code(g.color), code(g.bg)]).collect::<String>())
-        .collect::<Vec<_>>()
-        .join("\n")
+
+    #[wasm_bindgen(getter)]
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
+    /// Unicode code points (a `Uint32Array` in JavaScript).
+    #[wasm_bindgen(getter)]
+    pub fn chars(&self) -> Vec<u32> {
+        self.chars.clone()
+    }
+
+    /// Foreground colors as palette indices (a `Uint8Array`); see [`PALETTE`].
+    #[wasm_bindgen(getter)]
+    pub fn fg(&self) -> Vec<u8> {
+        self.fg.clone()
+    }
+
+    /// Background colors as palette indices (a `Uint8Array`); see [`PALETTE`].
+    #[wasm_bindgen(getter)]
+    pub fn bg(&self) -> Vec<u8> {
+        self.bg.clone()
+    }
+}
+
+/// Palette order shared with the page: index 0 is the default color, then these. The page maps
+/// each index to a CSS class (`PALETTE_CLASSES` in `www/main.js`).
+const PALETTE: [Color; 10] = [
+    Color::Red,
+    Color::Blue,
+    Color::Glass,
+    Color::Wall,
+    Color::Floor,
+    Color::Door,
+    Color::Key,
+    Color::Hint,
+    Color::Ink,
+    Color::Slab,
+];
+
+fn palette_index(color: Option<Color>) -> u8 {
+    color.map_or(0, |c| PALETTE.iter().position(|&p| p == c).expect("color missing from PALETTE") as u8 + 1)
 }
 
 #[cfg(test)]
@@ -113,18 +171,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn encodes_each_glyph_with_a_color() {
+    fn cells_hold_glyphs_and_attributes_in_parallel_arrays() {
         let game = WebGame::new().unwrap();
         let board = game.board();
-        let rows: Vec<Vec<char>> = board.split('\n').map(|r| r.chars().collect()).collect();
-        assert!(rows.iter().all(|r| r.len() % 3 == 0));
-        assert_eq!(rows[0][..6], ['┏', 'w', '.', '━', 'w', '.']);
+        assert_eq!(board.height(), 9);
+        assert_eq!(board.width(), 40); // the label row is the longest; other rows are padded
+        assert_eq!((board.chars().len(), board.fg().len(), board.bg().len()), (360, 360, 360));
+        assert_eq!(board.chars()[0], '┏' as u32);
+        assert_eq!(board.fg()[0], palette_index(Some(Color::Wall)));
+        assert_eq!(board.bg()[0], 0);
+        assert_eq!(board.chars()[board.width() - 1], ' ' as u32); // padding
         assert_eq!(game.board_width(), 29);
-        let status: String = game.status().chars().step_by(3).collect();
-        assert_eq!(status, "←↑↓→ wasd hjkl swipe move · r restart");
-        let title: Vec<char> = game.title().chars().collect();
-        assert_eq!(title[..3], ['▄', 's', '.']); // slab edge: white half block
-        assert_eq!(game.title().split('\n').count(), 7);
+
+        let status = game.status();
+        let text: String = status.chars().iter().map(|&c| char::from_u32(c).unwrap()).collect();
+        assert_eq!(text, "←↑↓→ wasd hjkl swipe move · r restart");
+
+        let title = game.title();
+        assert_eq!((title.width(), title.height()), (37, 7));
+        assert_eq!(title.chars()[0], '▄' as u32);
+        assert_eq!(title.fg()[0], palette_index(Some(Color::Slab)));
+    }
+
+    #[test]
+    fn palette_indices_are_distinct() {
+        let mut indices: Vec<u8> = PALETTE.iter().map(|&c| palette_index(Some(c))).collect();
+        indices.push(palette_index(None));
+        indices.sort();
+        indices.dedup();
+        assert_eq!(indices.len(), PALETTE.len() + 1);
     }
 
     #[test]
