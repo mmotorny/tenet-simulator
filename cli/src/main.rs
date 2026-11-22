@@ -118,7 +118,7 @@ fn svg_frame(mut game: Game, moves: &str) -> Result<String, String> {
     for ch in moves.chars().filter(|c| !c.is_whitespace()) {
         game.step(parse_move(ch)?);
     }
-    Ok(view::to_svg(&screen(&game).stacked(true)))
+    Ok(tenet_core::paint::to_svg(&screen(&game).stacked(true)))
 }
 
 fn run_scripted(mut game: Game, moves: &str, trace: bool, color: bool) -> Result<(), String> {
@@ -168,38 +168,15 @@ impl Drop for TerminalGuard {
 /// Draws the screen centered: title at the top, status at the bottom, board in between.
 fn draw(game: &Game, color: bool) -> io::Result<()> {
     let (cols, rows) = terminal::size()?;
-    let (cols, rows) = (cols as usize, rows as usize);
     let screen = screen(game);
-    let title_h = screen.title.len();
-    let board_h = screen.board.len();
-
     let mut out = io::stdout();
     queue!(out, terminal::Clear(terminal::ClearType::All))?;
-    let mut put = |x: usize, y: usize, row: &[Glyph]| -> io::Result<()> {
-        if y < rows {
+    for view::Placement { x, y, row } in screen.layout(cols as usize, rows as usize) {
+        if y < rows as usize {
             queue!(out, cursor::MoveTo(x as u16, y as u16))?;
             write!(out, "{}", line(row, color))?;
         }
-        Ok(())
-    };
-    let centered = |w: usize| cols.saturating_sub(w) / 2;
-
-    let needed = 1 + title_h + 1 + board_h + 1 + 1 + 1;
-    let (title_y, status_y) = if rows >= needed { (1, rows - 2) } else { (0, title_h + 1 + board_h + 1) };
-    let board_y = {
-        let lo = title_y + title_h + 1;
-        let hi = status_y.saturating_sub(board_h + 1).max(lo);
-        (rows.saturating_sub(board_h) / 2).clamp(lo, hi)
-    };
-
-    let title_w = screen.title.first().map_or(0, Vec::len);
-    for (i, row) in screen.title.iter().enumerate() {
-        put(centered(title_w), title_y + i, row)?;
     }
-    for (i, row) in screen.board.iter().enumerate() {
-        put(centered(screen.board_width), board_y + i, row)?;
-    }
-    put(centered(screen.status.len()), status_y, &screen.status)?;
     out.flush()
 }
 

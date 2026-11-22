@@ -1,16 +1,28 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // SPDX-FileCopyrightText: 2026 Maksym Motorny
 
-//! WebAssembly bindings: a thin wrapper that lets the page drive the core.
+//! WebAssembly bindings: the page drives the game through [`WebGame`], which draws the screen onto
+//! a canvas the way a terminal emulator draws its cell buffer.
 
 use tenet_core::game::{Dir, Game, Status, StepOutcome};
 use tenet_core::level::Level;
 use tenet_core::levels;
-use tenet_core::view::{self, Color};
+use tenet_core::paint::{paint, Metrics, Shape};
+use tenet_core::view;
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
+use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
 const PLAYING_HINTS: &[view::Hint] = &[("←↑↓→ wasd hjkl swipe", "move"), ("r", "restart")];
 const EXITED_HINTS: &[view::Hint] = &[("r tap", "restart")];
+
+/// JetBrains Mono (loaded by the page), then the GitHub monospace stack as fallback.
+const FONT_FAMILY: &str =
+    "\"JetBrains Mono\", ui-monospace, SFMono-Regular, \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace";
+/// Preferred font size in CSS pixels: the same as GitHub code blocks.
+const FONT_PX: f64 = 13.6;
+const LINE_HEIGHT: f64 = 1.25;
+const BACKGROUND: &str = "#000";
 
 #[wasm_bindgen]
 pub struct WebGame {
@@ -57,161 +69,119 @@ impl WebGame {
         self.game.status() == Status::Exited
     }
 
-    /// The title logo: black letters on a white slab.
-    pub fn title(&self) -> Cells {
-        Cells::new(&self.screen().title)
-    }
+    /// Draws the screen onto `canvas`, filling its CSS size at the device's pixel density.
+    pub fn render(&self, canvas: &HtmlCanvasElement) -> Result<(), JsValue> {
+        let window = web_sys::window().ok_or("no window")?;
+        let dpr = window.device_pixel_ratio();
+        let (css_w, css_h) = (canvas.client_width() as f64, canvas.client_height() as f64);
+        let (px_w, px_h) = ((css_w * dpr).round() as u32, (css_h * dpr).round() as u32);
+        if canvas.width() != px_w || canvas.height() != px_h {
+            canvas.set_width(px_w);
+            canvas.set_height(px_h);
+        }
+        let ctx: CanvasRenderingContext2d = canvas.get_context("2d")?.ok_or("no 2d context")?.dyn_into()?;
 
-    /// The map with the time label to the right of the exit row.
-    pub fn board(&self) -> Cells {
-        Cells::new(&self.screen().board)
-    }
+        ctx.set_font(&format!("100px {FONT_FAMILY}"));
+        let advance = ctx.measure_text("0")?.width() / 100.0;
+        let screen = view::screen(&self.game, PLAYING_HINTS, EXITED_HINTS);
+        let grid = Grid::fit(css_w, css_h, dpr, advance, screen.min_size());
+        let cells = screen.grid(grid.cols, grid.rows);
 
-    /// Width of the map alone, in cells; the page centers the board on it.
-    #[wasm_bindgen(js_name = boardWidth)]
-    pub fn board_width(&self) -> usize {
-        self.screen().board_width
-    }
-
-    /// The hint bar.
-    pub fn status(&self) -> Cells {
-        Cells::new(std::slice::from_ref(&self.screen().status))
-    }
-
-    fn screen(&self) -> view::Screen {
-        view::screen(&self.game, PLAYING_HINTS, EXITED_HINTS)
-    }
-}
-
-/// A rectangle of cells, like a terminal emulator's cell buffer: one glyph and its attributes per
-/// cell, in parallel arrays indexed by `y * width + x`. Rows shorter than `width` are padded with
-/// blank cells.
-#[wasm_bindgen]
-pub struct Cells {
-    width: usize,
-    height: usize,
-    chars: Vec<u32>,
-    fg: Vec<u8>,
-    bg: Vec<u8>,
-    bold: Vec<u8>,
-}
-
-#[wasm_bindgen]
-impl Cells {
-    fn new(rows: &[Vec<view::Glyph>]) -> Self {
-        let width = rows.iter().map(Vec::len).max().unwrap_or(0);
-        let height = rows.len();
-        let mut cells = Self {
-            width,
-            height,
-            chars: vec![' ' as u32; width * height],
-            fg: vec![0; width * height],
-            bg: vec![0; width * height],
-            bold: vec![0; width * height],
-        };
-        for (y, row) in rows.iter().enumerate() {
-            for (x, glyph) in row.iter().enumerate() {
-                let i = y * width + x;
-                cells.chars[i] = glyph.ch as u32;
-                cells.fg[i] = palette_index(glyph.color);
-                cells.bg[i] = palette_index(glyph.bg);
-                cells.bold[i] = glyph.bold.into();
+        ctx.set_fill_style_str(BACKGROUND);
+        ctx.fill_rect(0.0, 0.0, px_w as f64, px_h as f64);
+        let font = |bold: bool| format!("{}{}px {FONT_FAMILY}", if bold { "bold " } else { "" }, grid.font_px * dpr);
+        ctx.set_text_align("center");
+        ctx.set_text_baseline("middle");
+        for shape in paint(&cells, &grid.metrics(), grid.ox, grid.oy) {
+            match shape {
+                Shape::Rect { x, y, w, h, rgb } => {
+                    ctx.set_fill_style_str(&css(rgb));
+                    ctx.fill_rect(x.into(), y.into(), w.into(), h.into());
+                }
+                Shape::Line { x1, y1, x2, y2, width, rgb } => {
+                    ctx.begin_path();
+                    ctx.move_to(x1.into(), y1.into());
+                    ctx.line_to(x2.into(), y2.into());
+                    ctx.set_line_width(width.into());
+                    ctx.set_line_cap("square");
+                    ctx.set_stroke_style_str(&css(rgb));
+                    ctx.stroke();
+                }
+                Shape::Arc { cx, cy, rx, ry, start, end, width, rgb } => {
+                    ctx.begin_path();
+                    ctx.ellipse(cx.into(), cy.into(), rx.into(), ry.into(), 0.0, start.into(), end.into())?;
+                    ctx.set_line_width(width.into());
+                    ctx.set_line_cap("butt");
+                    ctx.set_stroke_style_str(&css(rgb));
+                    ctx.stroke();
+                }
+                Shape::Text { x, y, ch, rgb, bold } => {
+                    ctx.set_font(&font(bold));
+                    ctx.set_fill_style_str(&css(rgb));
+                    let (cx, cy) = (x + grid.metrics().cell_w / 2.0, y + grid.metrics().cell_h / 2.0);
+                    ctx.fill_text(ch.encode_utf8(&mut [0; 4]), cx.into(), cy.into())?;
+                }
             }
         }
-        cells
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn width(&self) -> usize {
-        self.width
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn height(&self) -> usize {
-        self.height
-    }
-
-    /// Unicode code points (a `Uint32Array` in JavaScript).
-    #[wasm_bindgen(getter)]
-    pub fn chars(&self) -> Vec<u32> {
-        self.chars.clone()
-    }
-
-    /// Foreground colors as palette indices (a `Uint8Array`); see [`PALETTE`].
-    #[wasm_bindgen(getter)]
-    pub fn fg(&self) -> Vec<u8> {
-        self.fg.clone()
-    }
-
-    /// Background colors as palette indices (a `Uint8Array`); see [`PALETTE`].
-    #[wasm_bindgen(getter)]
-    pub fn bg(&self) -> Vec<u8> {
-        self.bg.clone()
-    }
-
-    /// 1 where the glyph is bold (a `Uint8Array`).
-    #[wasm_bindgen(getter)]
-    pub fn bold(&self) -> Vec<u8> {
-        self.bold.clone()
+        Ok(())
     }
 }
 
-/// Palette order shared with the page: index 0 is the default color, then these. The page maps
-/// each index to a CSS class (`PALETTE_CLASSES` in `www/main.js`).
-const PALETTE: [Color; 10] = [
-    Color::Red,
-    Color::Blue,
-    Color::Glass,
-    Color::Wall,
-    Color::Floor,
-    Color::Door,
-    Color::Key,
-    Color::Hint,
-    Color::Ink,
-    Color::Slab,
-];
+fn css((r, g, b): (u8, u8, u8)) -> String {
+    format!("rgb({r},{g},{b})")
+}
 
-fn palette_index(color: Option<Color>) -> u8 {
-    color.map_or(0, |c| PALETTE.iter().position(|&p| p == c).expect("color missing from PALETTE") as u8 + 1)
+/// The cell grid for a canvas: font size, whole-device-pixel cell size, grid size, and the
+/// offset that centres the grid on the canvas.
+#[derive(Debug, PartialEq)]
+struct Grid {
+    font_px: f64,
+    cell_w: f64,
+    cell_h: f64,
+    cols: usize,
+    rows: usize,
+    ox: f32,
+    oy: f32,
+    dpr: f64,
+}
+
+impl Grid {
+    /// `advance` is the font's character width per pixel of font size. The font shrinks from
+    /// [`FONT_PX`] only if the screen's minimum grid wouldn't fit otherwise.
+    fn fit(css_w: f64, css_h: f64, dpr: f64, advance: f64, (min_cols, min_rows): (usize, usize)) -> Self {
+        let fit = (css_w / (min_cols as f64 * advance)).min(css_h / (min_rows as f64 * LINE_HEIGHT));
+        let font_px = FONT_PX.min(fit).max(4.0);
+        // Rounded down to whole device pixels, so the grid the font size was chosen for still fits.
+        let cell_w = (font_px * advance * dpr).floor().max(1.0);
+        let cell_h = (font_px * LINE_HEIGHT * dpr).floor().max(1.0);
+        let (px_w, px_h) = ((css_w * dpr).round(), (css_h * dpr).round());
+        let (cols, rows) = ((px_w / cell_w).floor() as usize, (px_h / cell_h).floor() as usize);
+        let ox = ((px_w - cols as f64 * cell_w) / 2.0).floor() as f32;
+        let oy = ((px_h - rows as f64 * cell_h) / 2.0).floor() as f32;
+        Self { font_px, cell_w, cell_h, cols, rows, ox, oy, dpr }
+    }
+
+    /// Stroke widths in whole device pixels, so painted lines stay crisp.
+    fn metrics(&self) -> Metrics {
+        let px = |em: f64, min: f64| (self.font_px * em * self.dpr).round().max(min) as f32;
+        let light = px(0.08, 1.0);
+        Metrics {
+            cell_w: self.cell_w as f32,
+            cell_h: self.cell_h as f32,
+            light,
+            heavy: px(0.16, 2.0),
+            bold: 4.0 * light,
+            bleed: 0.0,
+            snap: true,
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn cells_hold_glyphs_and_attributes_in_parallel_arrays() {
-        let game = WebGame::new().unwrap();
-        let board = game.board();
-        assert_eq!(board.height(), 9);
-        assert_eq!(board.width(), 40); // the label row is the longest; other rows are padded
-        assert_eq!((board.chars().len(), board.fg().len(), board.bg().len()), (360, 360, 360));
-        assert_eq!(board.chars()[0], '┏' as u32);
-        assert_eq!(board.fg()[0], palette_index(Some(Color::Wall)));
-        assert_eq!(board.bg()[0], 0);
-        assert_eq!(board.chars()[board.width() - 1], ' ' as u32); // padding
-        assert_eq!(game.board_width(), 29);
-
-        let status = game.status();
-        let text: String = status.chars().iter().map(|&c| char::from_u32(c).unwrap()).collect();
-        assert_eq!(text, "←↑↓→ wasd hjkl swipe move · r restart");
-
-        let title = game.title();
-        assert_eq!((title.width(), title.height()), (37, 7));
-        assert_eq!(title.chars()[0], '▄' as u32);
-        assert_eq!(title.fg()[0], palette_index(Some(Color::Slab)));
-        let diagonal = title.chars().iter().position(|&c| c == '╲' as u32).unwrap();
-        assert_eq!((title.bold()[diagonal], title.bold()[0]), (1, 0));
-    }
-
-    #[test]
-    fn palette_indices_are_distinct() {
-        let mut indices: Vec<u8> = PALETTE.iter().map(|&c| palette_index(Some(c))).collect();
-        indices.push(palette_index(None));
-        indices.sort();
-        indices.dedup();
-        assert_eq!(indices.len(), PALETTE.len() + 1);
-    }
+    const ADVANCE: f64 = 0.6;
 
     #[test]
     fn walks_out_of_the_exit() {
@@ -227,5 +197,29 @@ mod tests {
         assert!(game.exited());
         game.reset();
         assert_eq!((game.turn(), game.exited()), (0, false));
+    }
+
+    #[test]
+    fn grid_keeps_github_font_size_when_it_fits() {
+        let grid = Grid::fit(1000.0, 700.0, 2.0, ADVANCE, (53, 21));
+        assert_eq!(grid.font_px, FONT_PX);
+        assert_eq!((grid.cell_w, grid.cell_h), (16.0, 34.0)); // 13.6 × 0.6 × 2 and 13.6 × 1.25 × 2, rounded down
+        assert_eq!((grid.cols, grid.rows), (125, 41));
+        assert!(grid.ox >= 0.0 && grid.oy >= 0.0);
+    }
+
+    #[test]
+    fn grid_shrinks_the_font_on_narrow_screens() {
+        let grid = Grid::fit(300.0, 700.0, 3.0, ADVANCE, (53, 21));
+        assert!(grid.font_px < FONT_PX);
+        assert!(grid.cols >= 53, "{grid:?}");
+    }
+
+    #[test]
+    fn strokes_are_whole_pixels_and_bold_is_four_times_light() {
+        let m = Grid::fit(1000.0, 700.0, 2.0, ADVANCE, (53, 21)).metrics();
+        assert_eq!(m.light, m.light.round());
+        assert_eq!(m.bold, 4.0 * m.light);
+        assert!(m.snap);
     }
 }

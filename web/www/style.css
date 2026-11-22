@@ -1,143 +1,21 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 /* SPDX-FileCopyrightText: 2026 Maksym Motorny */
 
-/* A terminal: one fixed-size cell per glyph, nothing else on the page. */
-
-:root {
-  color-scheme: dark;
-}
+/* The page is one canvas, drawn by the game like a terminal emulator draws its screen. */
 
 html,
 body {
   margin: 0;
   height: 100%;
   background: #000;
-  color: #c8c8c8;
+  overflow: hidden;
   /* The whole screen is a swipe surface: no scrolling, zooming or pull-to-refresh. */
   touch-action: none;
   overscroll-behavior: none;
 }
 
-/* Title at the top, board in the middle, hint bar at the bottom, each centered. */
-#term {
-  /* Own stacking context, so cell background layers (z-index -1) stay above the page background. */
-  position: relative;
-  z-index: 0;
-  box-sizing: border-box;
-  height: 100%;
-  padding: 1lh 1ch;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1lh;
-  /* Same font and size as GitHub code blocks. */
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  font-size: 13.6px;
-  line-height: 1.25;
-  /* Stroke widths for painted box-drawing lines. */
-  /* Whole pixels, so painted lines stay crisp. */
-  --light: round(max(1px, 0.08em), 1px);
-  --heavy: round(max(2px, 0.16em), 1px);
-  /* Heavy strokes of bold glyphs, such as the logo's stems and diagonal: four times light. */
-  --bold: calc(4 * var(--light));
-  white-space: pre;
+#screen {
+  display: block;
+  width: 100vw;
+  height: 100dvh;
 }
-
-/* Blocks are centered on their own width; the board's time label hangs outside it. */
-#title,
-#board {
-  width: calc(var(--width) * 1ch);
-}
-
-/* The logo is the widest block: shrink it to fit narrow screens (a cell is about 0.6em wide). */
-#title {
-  font-size: min(1em, calc(94vw / (var(--width) * 0.6)));
-}
-
-#term div > div {
-  height: 1lh;
-}
-
-#term span {
-  display: inline-block;
-  width: 1ch;
-  height: 1lh;
-  overflow: hidden;
-  text-align: center;
-  vertical-align: top;
-}
-
-/* Block elements and box-drawing lines are painted, not drawn from a font. The paint bleeds a fraction of a pixel past
-   the cell so neighbouring blocks join without anti-aliasing seams at fractional cell edges. */
-#term span.block {
-  position: relative;
-  overflow: visible;
-}
-
-#term span.block::before {
-  content: "";
-  position: absolute;
-  inset: -0.4px;
-  background: var(--quadrants);
-  /* Above every cell's background, whose seam-hiding bleed would otherwise cover line ends. */
-  z-index: 1;
-}
-
-#term span.path {
-  position: relative;
-  overflow: visible;
-}
-
-#term span.path svg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-  z-index: 1;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: var(--light);
-  stroke-linecap: square;
-}
-
-#term span.path path {
-  vector-effect: non-scaling-stroke;
-}
-
-#term span.bold {
-  font-weight: bold;
-}
-
-/* Unicode has no heavy diagonals; bold diagonals get the bold stroke. */
-#term span.path.bold svg {
-  stroke-width: var(--bold);
-}
-
-.red { color: rgb(230 70 60); }
-.blue { color: rgb(70 140 235); }
-.glass { color: rgb(190 205 215); }
-.wall { color: rgb(140 140 140); }
-.floor { color: rgb(70 70 70); }
-.door,
-.key { color: rgb(230 230 230); }
-.ink { color: rgb(12 12 12); }
-.slab { color: rgb(240 240 240); }
-
-/* Background colors, painted on a layer behind the cell that bleeds a fraction of a pixel past it
-   (like painted glyphs) so neighbouring cells join without seams at fractional cell edges. */
-#term span[class*="bg-"] {
-  position: relative;
-}
-
-#term span[class*="bg-"]::after {
-  content: "";
-  position: absolute;
-  inset: -0.4px;
-  z-index: -1;
-  background: var(--bg);
-}
-
-.bg-slab { --bg: rgb(240 240 240); }
-.hint { color: rgb(110 110 110); }

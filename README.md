@@ -83,11 +83,11 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 | Path | Contents |
 |---|---|
-| `core/` | Deterministic core: levels, rules, and a renderer-agnostic view. No I/O, no dependencies. |
+| `core/` | Deterministic core: levels, rules, a renderer-agnostic view, screen layout, and the painter shared by the web canvas and the SVG export. No I/O, no dependencies. |
 | `core/levels/` | Level maps, one character per cell (legend in `core/src/level.rs`). |
 | `cli/` | Terminal front end (crossterm). |
 | `docs/` | README screenshot, generated with `--svg`. |
-| `web/` | WebAssembly bindings (`src/`) and the static page (`www/`): a minimal terminal emulator showing the same screen as the CLI. |
+| `web/` | WebAssembly front end (`src/`) that draws the same screen as the CLI onto a canvas, like a terminal emulator; the static page is in `www/`. |
 
 Every push to `main` is tested, built and deployed to GitHub Pages by `.github/workflows/pages.yml`.
 

@@ -8,5 +8,6 @@
 pub mod game;
 pub mod level;
 pub mod levels;
+pub mod paint;
 pub mod title;
 pub mod view;

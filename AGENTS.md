@@ -9,10 +9,10 @@ A simulator of strong determinism and time inversion, inspired by Nolan's *Tenet
 ## Code layout
 
 - Rust Cargo workspace.
-- `core/` (`tenet-core`): level parsing, game rules, and a renderer-agnostic view (rows of glyph + color). No I/O and no dependencies, so it compiles to WebAssembly.
+- `core/` (`tenet-core`): level parsing, game rules, a renderer-agnostic view (rows of glyphs with colors), the full-screen layout (`Screen::layout`/`grid`), and the painter (`paint.rs`) that turns cells into drawing commands, plus the SVG export. No I/O and no dependencies, so it compiles to WebAssembly.
 - `core/levels/`: level maps, one character per cell (legend in `core/src/level.rs`), bundled via `core/src/levels.rs`.
 - `cli/` (`tenet-cli`, binary `tenet`): terminal front end built on crossterm.
-- `web/` (`tenet-web`): wasm-bindgen wrapper (`src/`) and the static page (`www/`). `./build-web.sh` builds it; CI deploys it to https://mmotorny.github.io/tenet-simulator/ (see `.github/workflows/pages.yml`).
+- `web/` (`tenet-web`): draws the screen onto a `<canvas>` from the core's painter, snapped to device pixels (`src/`); the static page (`www/`) only handles input, resizing and font loading. Text is JetBrains Mono from Fontsource on jsDelivr, with the GitHub monospace stack as fallback. `./build-web.sh` builds it; CI deploys it to https://mmotorny.github.io/tenet-simulator/ (see `.github/workflows/pages.yml`).
 
 Commands:
 - `cargo run` — play interactively (arrows / wasd / hjkl, `r` to restart, `q` or `Esc` to quit). The screen is centered: title logo at the top, board in the middle, hint bar at the bottom.
@@ -69,9 +69,9 @@ Commands:
 ## Working agreements
 
 - When pasting rendered diagrams into chat, show the real glyphs. Never substitute placeholder marks (e.g. `_` for the blank open-door glyph `⠀`); describe invisible things in prose instead.
-- The web page is just a terminal emulator: it shows exactly the screen the CLI shows (`view::screen` in the core), one fixed-width cell per glyph. No extra web decoration — any decoration must be textual and shared with the terminal.
+- The web page is just a terminal emulator: a canvas showing exactly the screen the CLI shows (same `view::screen` and `Screen::layout`), one fixed-size cell per glyph. No extra web decoration — any decoration must be textual and shared with the terminal.
 - Diagrams must stay readable as plain text: the CLI honors `NO_COLOR`, and glyphs (not just color) distinguish forward from inverted.
 - Licensed BSD-3-Clause (`LICENSE`). Every source file starts with SPDX headers:
   `// SPDX-License-Identifier: BSD-3-Clause` and `// SPDX-FileCopyrightText: 2026 Maksym Motorny`.
 - Glyphs carry a foreground color, an optional background color (`Glyph::bg`) and a `bold` flag (web/SVG draw bold heavy strokes and diagonals at 4× light; SGR bold in the terminal).
-- Like a terminal emulator, the web page paints block elements (`█ ▀ ▄ ▌ ▐`, quadrants) and box-drawing glyphs (lines, rounded corners, diagonals) itself instead of using font glyphs, so they join exactly across cells. The SVG export paints blocks, box-drawing lines (`view::line_arms`), arcs and diagonals. Block quadrants: `view::block_quadrants` (mirrored in `web/www/main.js`).
+- Like a terminal emulator, the painter (`core/src/paint.rs`) draws block elements (`view::block_quadrants`), box-drawing lines (`view::line_arms`), rounded corners and diagonals as geometry instead of font glyphs, so they join exactly across cells. Both the web canvas and the SVG export use it; only other glyphs are drawn as text.
