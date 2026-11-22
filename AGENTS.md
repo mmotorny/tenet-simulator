@@ -9,8 +9,10 @@ A simulator of strong determinism and time inversion, inspired by Nolan's *Tenet
 ## Rules (`core/src/game.rs`)
 
 - Each move advances the protagonist's own time by one and global time by their arrow: +1 forward, −1 inverted.
-- The turnstile's mirror (the booth's middle cell, halfway between its red and blue doors) reverses the arrow when stepped onto.
-- The worldline is a list of segments, one per stretch between inversions. Earlier segments replay as other selves at the current global time (dimmer colors). At an inversion moment only the self leaving the mirror is shown.
+- The turnstile is a red door, a red cell, a blue cell and a blue door. Its mirror lies between the two cells: crossing it reverses the arrow and takes no global time, so at that instant both selves exist, one on each side.
+- Turnstile doors are closed while anyone is inside the booth (they shut as you step in and reopen once it is empty).
+- The protagonist appears on the start (`S`, just outside the entry door); stepping onto the finish (`F`, just outside the exit door) ends the level.
+- The worldline is a list of segments, one per stretch between inversions. Earlier segments replay as other selves at the current global time (dimmer colors). 
 - Level properties after the map: `exit-closes: 9` (exit door open for t < 9, walkable only while open, drawn by the current time) and `timeline: -2..22`.
 
 ## Code layout
@@ -24,7 +26,7 @@ A simulator of strong determinism and time inversion, inspired by Nolan's *Tenet
 Commands:
 - `cargo run` — play interactively (arrows / wasd / hjkl, `r` to restart, `q` or `Esc` to quit). The screen is centered: title logo at the top, board in the middle, hint bar at the bottom.
 - `cargo run -- --moves ddddww --trace` — scripted run that prints every frame (without the title). Use this to discuss runs as text.
-- `cargo run -q -- --svg --moves ddddwwwwddaassdddddd > docs/screenshot.svg` — regenerate the README screenshot (mid-run, inverted); a test fails while it is stale. GitHub can't align glyph rows in Markdown code blocks (font fallback), hence the SVG.
+- `cargo run -q -- --svg --moves dddddwwwwddaassdddddd > docs/screenshot.svg` — regenerate the README screenshot (mid-run, inverted); a test fails while it is stale. GitHub can't align glyph rows in Markdown code blocks (font fallback), hence the SVG.
 - `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings` — keep both clean (CI enforces it).
 
 ## Visual vocabulary
@@ -39,9 +41,10 @@ Commands:
 | Room walls | `┏ ━ ┓ ┃ ┗ ┛` (heavy) | gray |
 | Floor | `·` | dark gray |
 | Glass | `⋮` vertical, `⋯` horizontal (midline) | pale |
+| Start / finish | `▶` / `■`, just outside the entry / exit door | near-white |
 | Doors (all doors) | `⠀` open → `⠉ ⠛ ⠿` → `⣿` closed (slide animation) | near-white |
 | Turnstile frame | `╭ ─ ╮ ╰ ╯` (thin, rounded) | red half / blue half |
-| Timeline | under the board: global-time axis (ticks every 5, `⣿` where the exit closes), `▼` + current time colored by arrow, one swimlane per segment (newest at the bottom; `━`, corners `┓┛` / `┏┗` connect lanes at inversions; `●`/`○` where each self is now) | active lane red/blue, earlier lanes dim |
+| Timeline | under the board: tick labels every 5 with the current time among them (colored by arrow; ticks too close to it are dropped), axis with a colored tick at now and `⣿` where the exit closes; one swimlane per segment (newest at the bottom; `━`, corners `┓┛` / `┏┗` connect lanes at inversions; events: `▶` start, `╋` passing a room door, `■` finish; `●`/`○` where each self is now) | active lane red/blue, earlier lanes dim |
 | Hint bar | keys bright, actions and `·` separators dim; arrows drawn as `←↑↓→` | near-white / dim gray |
 | Title logo | 3 rows, letters roughly square like the poster, reading the same rotated 180° (`T E N Ǝ ⊥`): block stems (`▄ █ ▀`), heavy bars (`━ ╺ ╸`), N with heavy-line verticals (`╻ ┃ ╹`) and an evenly stepped quadrant-block diagonal; `core/src/title.rs`. Rejected: thin line art, 5-row block letters, light lines on the slab (too thin) | black ink on a white slab (as in the film); slab edges are `▄`/`▀` half-block rows |
 
@@ -50,9 +53,9 @@ Commands:
 
 ## Turnstile
 
-- A freestanding booth with **two doors** (red side, blue side) and an **empty interior**: no partition, no midline.
+- A freestanding booth: red door, red cell, blue cell, blue door. No partition or midline is drawn; the mirror between the two cells is invisible. The doors close while anyone is inside.
 - Physically it would act as an invisible mirror: a surface that leads you into the past. To an outside observer, your forward self and your inverted self converge on it and annihilate (and emerge in pairs when leaving inversion). The film's booth hides that visual paradox.
-- Inversion happens on the mirror, the booth's middle cell.
+- Inversion happens when crossing the mirror between the booth's two cells.
 
 ## Prototype level
 

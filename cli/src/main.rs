@@ -261,9 +261,9 @@ mod tests {
     use super::*;
 
     /// The README screenshot: mid-run, inverted, with the forward self replaying at the same moment.
-    const README_MOVES: &str = "ddddwwwwddaassdddddd";
+    const README_MOVES: &str = "dddddwwwwddaassdddddd";
 
-    /// Regenerate with: cargo run -q -- --svg --moves ddddwwwwddaassdddddd > docs/screenshot.svg
+    /// Regenerate with: cargo run -q -- --svg --moves dddddwwwwddaassdddddd > docs/screenshot.svg
     #[test]
     fn readme_screenshot_is_up_to_date() {
         let level = Level::parse(DEFAULT_LEVEL).unwrap();

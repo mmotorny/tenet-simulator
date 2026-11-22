@@ -1,12 +1,12 @@
-WWWWWWWWWWWWWWW
-W......g......W
-W......g......X
-W....TTTTT....W
-W....r___b....W
-W....TTTTT....W
-E......g......W
-W......g......W
-WWWWWWWWWWWWWWW
+ WWWWWWWWWWWWWWW
+ W......g......W
+ W......g......XF
+ W....TTTT.....W
+ W....r__b.....W
+ W....TTTT.....W
+SE......g......W
+ W......g......W
+ WWWWWWWWWWWWWWW
 
 exit-closes: 9
 timeline: -2..22

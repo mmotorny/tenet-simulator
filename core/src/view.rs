@@ -86,6 +86,13 @@ impl Glyph {
 }
 
 pub const DOOR_OPEN: char = '⠀';
+pub const DOOR_CLOSED: char = '⣿';
+/// Where the protagonist appears, outside the entry door; also the start of the first swimlane.
+pub const START: char = '▶';
+/// Stepping onto it ends the level; also the end of the last swimlane.
+pub const FINISH: char = '■';
+/// On a swimlane: passing through a room door.
+pub const DOOR_PASSAGE: char = '╋';
 /// Door slide animation, open → closed. Used once doors can close.
 pub const DOOR_FRAMES: [char; 5] = ['⠀', '⠉', '⠛', '⠿', '⣿'];
 
@@ -171,7 +178,7 @@ impl Painter<'_> {
             Some(Tile::Entry) => Glyph::new(DOOR_OPEN, Color::Door),
             Some(Tile::Exit) => {
                 let open = self.game.level().exit_open_at(self.game.now());
-                Glyph::new(if open { DOOR_OPEN } else { DOOR_FRAMES[DOOR_FRAMES.len() - 1] }, Color::Door)
+                Glyph::new(if open { DOOR_OPEN } else { DOOR_CLOSED }, Color::Door)
             }
             Some(Tile::TurnstileFrame) => {
                 let ch = match (l.n, l.s, l.e, l.w) {
@@ -184,10 +191,15 @@ impl Painter<'_> {
                 };
                 Glyph::new(ch, self.turnstile_color(x))
             }
-            Some(Tile::TurnstileDoor(_)) => Glyph::new(DOOR_OPEN, self.turnstile_color(x)),
+            Some(Tile::TurnstileDoor(_)) => {
+                let open = self.game.turnstile_open_at(self.game.now());
+                Glyph::new(if open { DOOR_OPEN } else { DOOR_CLOSED }, self.turnstile_color(x))
+            }
+            Some(Tile::Start) => Glyph::new(START, Color::Key),
+            Some(Tile::Finish) => Glyph::new(FINISH, Color::Key),
             Some(Tile::Glass) => Glyph::new('⋮', Color::Glass),
             Some(Tile::Floor) => Glyph::new('·', Color::Floor),
-            Some(Tile::TurnstileInterior) | None => Glyph::BLANK,
+            Some(Tile::TurnstileInterior | Tile::Void) | None => Glyph::BLANK,
         }
     }
 
@@ -263,13 +275,15 @@ pub struct Screen {
     pub status: Vec<Glyph>,
 }
 
-/// The timeline: a global-time axis with a `▼` at the current time, and one swimlane per worldline
-/// segment, newest at the bottom. Forward lanes grow rightward, inverted lanes leftward; an
-/// inversion connects consecutive lanes with a pair of corners at the moment it happened. Each lane
-/// shows where its self is at the current time, if it exists then.
+/// The timeline: a global-time axis, with the current time labelled among the ticks, and one
+/// swimlane per worldline segment, newest at the bottom. Forward lanes grow rightward, inverted
+/// lanes leftward; an inversion connects consecutive lanes with a pair of corners at the moment it
+/// happened. Lanes also mark the level's start and finish and every passage through a room door,
+/// and show where each self is at the current time, if it exists then.
 pub fn timeline(game: &Game) -> (Vec<Vec<Glyph>>, usize) {
+    let level = game.level();
     let segments = game.segments();
-    let (mut lo, mut hi) = game.level().timeline();
+    let (mut lo, mut hi) = level.timeline();
     for segment in segments {
         let (a, b) = segment.span();
         lo = lo.min(a - 1);
@@ -279,33 +293,46 @@ pub fn timeline(game: &Game) -> (Vec<Vec<Glyph>>, usize) {
     let col = |t: i32| (t - lo) as usize;
     let ticks: Vec<i32> = (lo..=hi).filter(|t| t.rem_euclid(5) == 0).collect();
     let now = game.now();
-
-    let mut labels = vec![Glyph::BLANK; width];
-    for &t in &ticks {
-        for (i, ch) in t.to_string().chars().enumerate() {
-            if let Some(cell) = labels.get_mut(col(t) + i) {
-                *cell = Glyph::new(ch, Color::Hint);
-            }
-        }
-    }
-
     let now_color = match game.arrow() {
         Arrow::Forward => Color::Red,
         Arrow::Inverted => Color::Blue,
     };
-    let mut marker = vec![Glyph::BLANK; col(now)];
-    marker.extend(text(&format!("▼{now}"), Some(now_color)));
+
+    // Labels: the current time, plus every tick label that keeps at least a cell of space to it.
+    let now_label = now.to_string();
+    let now_span = col(now)..col(now) + now_label.len();
+    let mut labels = vec![Glyph::BLANK; width];
+    for &t in &ticks {
+        let label = t.to_string();
+        let span = col(t)..col(t) + label.len();
+        if span.start <= now_span.end && now_span.start <= span.end {
+            continue;
+        }
+        for (i, ch) in label.chars().enumerate() {
+            if let Some(cell) = labels.get_mut(span.start + i) {
+                *cell = Glyph::new(ch, Color::Hint);
+            }
+        }
+    }
+    for (i, ch) in now_label.chars().enumerate() {
+        match labels.get_mut(now_span.start + i) {
+            Some(cell) => *cell = Glyph::new(ch, now_color),
+            None => labels.push(Glyph::new(ch, now_color)),
+        }
+    }
 
     let mut axis = vec![Glyph::new('─', Color::Hint); width];
     for &t in &ticks {
         axis[col(t)] = Glyph::new('┼', Color::Hint);
     }
-    if let Some(t) = game.level().exit_closes().filter(|t| (lo..=hi).contains(t)) {
-        axis[col(t)] = Glyph::new(DOOR_FRAMES[DOOR_FRAMES.len() - 1], Color::Door);
+    if let Some(t) = level.exit_closes().filter(|t| (lo..=hi).contains(t)) {
+        axis[col(t)] = Glyph::new(DOOR_CLOSED, Color::Door);
     }
+    axis[col(now)] = Glyph::new('┼', now_color);
 
-    let mut rows = vec![labels, marker, axis];
+    let mut rows = vec![labels, axis];
     let last = segments.len() - 1;
+    let selves_now = game.selves_at(now);
     for (i, segment) in segments.iter().enumerate() {
         let active = i == last;
         let color = match (segment.arrow, active) {
@@ -315,9 +342,14 @@ pub fn timeline(game: &Game) -> (Vec<Vec<Glyph>>, usize) {
             (Arrow::Inverted, false) => Color::BlueDim,
         };
         let mut lane = vec![Glyph::BLANK; width];
-        let (a, b) = segment.span();
-        for t in a..=b {
-            lane[col(t)] = Glyph::new('━', color);
+        for (step, pos) in segment.path.iter().enumerate() {
+            let t = segment.start + step as i32 * segment.arrow.dt();
+            lane[col(t)] = match level.tile(*pos) {
+                Some(tile) if tile.is_room_door() => Glyph::new(DOOR_PASSAGE, Color::Door),
+                Some(Tile::Start) => Glyph::new(START, Color::Key),
+                Some(Tile::Finish) => Glyph::new(FINISH, Color::Key),
+                _ => Glyph::new('━', color),
+            };
         }
         // Corners where this lane connects to the previous and next ones.
         if i > 0 {
@@ -328,7 +360,7 @@ pub fn timeline(game: &Game) -> (Vec<Vec<Glyph>>, usize) {
             let ch = if segment.arrow == Arrow::Forward { '┓' } else { '┏' };
             lane[col(next.start)] = Glyph::new(ch, color);
         }
-        if game.selves_at(now).iter().any(|s| s.active == active && segment.pos_at(now) == Some(s.pos)) {
+        if selves_now.iter().any(|s| s.active == active && segment.pos_at(now) == Some(s.pos)) {
             lane[col(now)] = self_glyph(segment.arrow, active);
         }
         rows.push(lane);
@@ -345,7 +377,7 @@ pub fn screen(game: &Game, playing: &[Hint], exited: &[Hint]) -> Screen {
     let status = match game.status() {
         Status::Playing => hints(playing),
         Status::Exited => {
-            let message = format!("You walked out of the exit door at t = {}, after {} moves.", game.now(), game.moves());
+            let message = format!("You left the level at t = {}, after {} moves.", game.now(), game.moves());
             let mut line = text(&message, None);
             if !exited.is_empty() {
                 line.extend(text(" · ", Some(Color::Hint)));
@@ -533,42 +565,8 @@ mod tests {
     use super::*;
     use crate::level::Level;
 
-    #[test]
-    fn renders_the_bundled_level() {
-        let game = Game::new(Level::parse(crate::levels::FREEPORT).unwrap());
-        let expected = "\
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ · · · · · · ⋮ · · · · · · ┃
-┃ · · · · · · ⋮ · · · · · · ⠀
-┃ · · · · ╭───────╮ · · · · ┃
-┃ · · · · ⠀       ⠀ · · · · ┃
-┃ · · · · ╰───────╯ · · · · ┃
-● · · · · · · ⋮ · · · · · · ┃
-┃ · · · · · · ⋮ · · · · · · ┃
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━┛";
-        assert_eq!(to_plain_text(&render(&game)), expected);
-    }
-
-    #[test]
-    fn screen_has_timeline_and_status() {
-        let mut game = Game::new(Level::parse(crate::levels::FREEPORT).unwrap());
-        let playing = [("←↑↓→ wasd", "move"), ("q", "quit")];
-        let screen = screen(&game, &playing, &[("r", "restart")]);
-        assert_eq!((screen.board_width, screen.timeline_width), (29, 25)); // timeline -2..22
-        assert_eq!(to_plain_text(std::slice::from_ref(&screen.status)), "←↑↓→ wasd move · q quit");
-        let colors: Vec<Option<Color>> = screen.status.iter().map(|g| g.color).collect();
-        assert_eq!(colors[0], Some(Color::Key)); // ←
-        assert_eq!(colors[4], None); // space between key groups
-        assert_eq!(colors[10], Some(Color::Hint)); // "move"
-
-        play(&mut game, "ddddwwwwddaassddddddddd");
-        play(&mut game, "wwd");
-        let status = to_plain_text(&[screen_of(&game, &playing, &[("r", "restart")]).status]);
-        assert_eq!(status, "You walked out of the exit door at t = 8, after 26 moves. · r restart");
-    }
-
-    fn screen_of(game: &Game, playing: &[Hint], exited: &[Hint]) -> Screen {
-        screen(game, playing, exited)
+    fn freeport() -> Game {
+        Game::new(Level::parse(crate::levels::FREEPORT).unwrap())
     }
 
     fn play(game: &mut Game, moves: &str) {
@@ -584,72 +582,132 @@ mod tests {
         }
     }
 
+    /// Mid-run: inverted at t = 17, now at t = 14 with the forward self still alive.
+    const MID_RUN: &str = "dddddwwwwddaassdddddd";
+
     #[test]
-    fn timeline_has_axis_marker_and_one_lane_per_segment() {
-        let mut game = Game::new(Level::parse(crate::levels::FREEPORT).unwrap());
+    fn renders_the_bundled_level() {
+        let expected = [
+            "  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━┓  ",
+            "  ┃ · · · · · · ⋮ · · · · · · ┃  ",
+            "  ┃ · · · · · · ⋮ · · · · · · ⠀ ■",
+            "  ┃ · · · · ╭─────╮ · · · · · ┃  ",
+            "  ┃ · · · · ⠀     ⠀ · · · · · ┃  ",
+            "  ┃ · · · · ╰─────╯ · · · · · ┃  ",
+            "● ⠀ · · · · · · ⋮ · · · · · · ┃  ",
+            "  ┃ · · · · · · ⋮ · · · · · · ┃  ",
+            "  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━┛  ",
+        ];
+        assert_eq!(to_plain_text(&render(&freeport())), expected.join("\n"));
+    }
+
+    #[test]
+    fn turnstile_halves_are_red_and_blue() {
+        let rows = render(&freeport());
+        assert_eq!(rows[3][12].color, Some(Color::Red)); // ╭
+        assert_eq!(rows[3][18].color, Some(Color::Blue)); // ╮
+        assert_eq!(rows[4][12].color, Some(Color::Red)); // red door
+        assert_eq!(rows[4][18].color, Some(Color::Blue)); // blue door
+    }
+
+    #[test]
+    fn turnstile_doors_are_drawn_closed_while_someone_is_inside() {
+        let mut game = freeport();
+        play(&mut game, "dddddwwwwddaassdd"); // in the red cell at t = 17
+        let text = to_plain_text(&render(&game));
+        assert_eq!(text.lines().nth(4).unwrap(), "  ┃ · · · · ⣿ ●   ⣿ · · · · · ┃  ");
+    }
+
+    #[test]
+    fn screen_has_timeline_and_status() {
+        let mut game = freeport();
+        let playing = [("←↑↓→ wasd", "move"), ("q", "quit")];
+        let screen = screen(&game, &playing, &[("r", "restart")]);
+        assert_eq!((screen.board_width, screen.timeline_width), (33, 25)); // timeline -2..22
+        assert_eq!(to_plain_text(std::slice::from_ref(&screen.status)), "←↑↓→ wasd move · q quit");
+        let colors: Vec<Option<Color>> = screen.status.iter().map(|g| g.color).collect();
+        assert_eq!(colors[0], Some(Color::Key)); // ←
+        assert_eq!(colors[4], None); // space between key groups
+        assert_eq!(colors[10], Some(Color::Hint)); // "move"
+
+        play(&mut game, "dddddwwwwddaassdddddddddwwdd");
+        let status = to_plain_text(&[super::screen(&game, &playing, &[("r", "restart")]).status]);
+        assert_eq!(status, "You left the level at t = 7, after 28 moves. · r restart");
+    }
+
+    #[test]
+    fn timeline_labels_the_current_time_among_the_ticks_and_has_a_lane_per_segment() {
+        let mut game = freeport();
         let (rows, width) = timeline(&game);
         let text = to_plain_text(&rows);
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(width, 25);
         assert_eq!(lines[0].trim_end(), "  0    5    10   15   20");
-        assert_eq!(lines[1], "  ▼0");
-        assert_eq!(lines[2], "──┼────┼───⣿┼────┼────┼──"); // the exit door closes at t = 9
-        assert_eq!(lines[3].trim_end(), "  ●");
-        assert_eq!(lines.len(), 4);
+        assert_eq!(rows[0][2].color, Some(Color::Red)); // the current time, not the tick label
+        assert_eq!(lines[1], "──┼────┼───⣿┼────┼────┼──"); // the exit door closes at t = 9
+        assert_eq!(lines[2].trim_end(), "  ●");
+        assert_eq!(lines.len(), 3);
 
-        // Mid-run: inverted at t = 17, now at t = 14 with the forward self still alive.
-        play(&mut game, "ddddwwwwddaassdddddd");
+        play(&mut game, MID_RUN);
         let (rows, _) = timeline(&game);
         let text = to_plain_text(&rows);
         let lines: Vec<&str> = text.lines().collect();
-        assert_eq!(lines[1], "                ▼14");
-        assert_eq!(lines[3].trim_end(), "  ━━━━━━━━━━━━━━●━━┓");
-        assert_eq!(lines[4].trim_end(), "                ○━━┛");
-        assert_eq!(rows[3][2].color, Some(Color::RedDim)); // the earlier lane is dim
-        assert_eq!(rows[4][16].color, Some(Color::Blue)); // the active self is bright
+        assert_eq!(lines[0].trim_end(), "  0    5    10  14    20"); // 15 is too close to 14 and is left out
+        assert_eq!(lines[2].trim_end(), "  ▶╋━━━━━━━━━━━━●━━┓"); // start, entry door, ..., inversion at 17
+        assert_eq!(lines[3].trim_end(), "                ○━━┛");
+        assert_eq!(rows[2][4].color, Some(Color::RedDim)); // the earlier lane is dim
+        assert_eq!(rows[3][16].color, Some(Color::Blue)); // the active self is bright
+    }
+
+    #[test]
+    fn timeline_marks_leaving_through_the_exit_door_and_the_finish() {
+        let mut game = freeport();
+        play(&mut game, "dddddwwwwddaassdddddddddwwdd"); // on the finish at t = 7
+        let (rows, _) = timeline(&game);
+        let text = to_plain_text(&rows);
+        assert_eq!(text.lines().nth(3).unwrap().trim_end(), "         ○╋━━━━━━━━┛"); // exit door at t = 8
     }
 
     #[test]
     fn timeline_widens_to_fit_the_worldline() {
-        let mut game = Game::new(Level::parse("Er___bX\n\ntimeline: 0..2").unwrap());
-        play(&mut game, "dddddd"); // inverted at t = 3, back to t = 0 on the exit
+        let mut game = Game::new(Level::parse("SEr__bXF\n\ntimeline: 0..2").unwrap());
+        play(&mut game, "ddddddd"); // inverted at t = 3, back to t = 0 on the finish
         let (_, width) = timeline(&game);
         assert_eq!(width, 6); // -1..4: one unit of margin around the span 0..3
     }
 
     #[test]
     fn board_shows_every_self_present_now_and_the_door_by_the_clock() {
-        let mut game = Game::new(Level::parse(crate::levels::FREEPORT).unwrap());
-        play(&mut game, "ddddwwwwddaassdddddd"); // t = 14
+        let mut game = freeport();
+        play(&mut game, MID_RUN); // t = 14
         let board = render(&game);
         let text = to_plain_text(&board);
-        let row = text.lines().nth(4).unwrap();
-        assert_eq!(row, "┃ · · · ● ⠀       ⠀ ○ · · · ┃");
-        assert_eq!(board[4][8].color, Some(Color::RedDim)); // forward self, replaying
-        assert_eq!(board[4][20].color, Some(Color::Blue)); // you
-        assert!(text.lines().nth(2).unwrap().ends_with('⣿')); // the exit door is closed at t = 14
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines[3], "  ┃ · · · ● ╭─────╮ · · · · · ┃  ");
+        assert_eq!(lines[4], "  ┃ · · · · ⠀     ⠀ · ○ · · · ┃  ");
+        assert_eq!(board[3][10].color, Some(Color::RedDim)); // forward self, replaying
+        assert_eq!(board[4][22].color, Some(Color::Blue)); // you
+        assert!(lines[2].ends_with("⣿ ■")); // the exit door is closed at t = 14
     }
 
     #[test]
     fn stacked_centers_blocks_on_the_map() {
-        let game = Game::new(Level::parse(crate::levels::FREEPORT).unwrap());
-        let rows = screen(&game, &[("q", "quit")], &[]).stacked(true);
+        let rows = screen(&freeport(), &[("q", "quit")], &[]).stacked(true);
         let text = to_plain_text(&rows);
         let lines: Vec<&str> = text.lines().collect();
-        // Title slab (39 wide) is the widest block: the map is indented by 5, the timeline by 7.
+        // Title slab (39 wide) is the widest block: the map is indented by 3, the timeline by 7.
         assert!(lines[0].starts_with("▄▄▄▄"));
         assert!(lines[1].starts_with("  ╺━▄━╸"));
         assert!(lines[6].starts_with("     ┏━━"));
         assert!(lines[16].starts_with("         0    5"));
-        assert!(lines[18].starts_with("       ──┼"));
+        assert!(lines[17].starts_with("       ──┼"));
         assert_eq!(lines.last().unwrap().trim(), "q quit");
     }
 
     #[test]
     fn layout_puts_title_on_top_status_at_bottom_board_and_timeline_centered() {
-        let game = Game::new(Level::parse(crate::levels::FREEPORT).unwrap());
-        let screen = screen(&game, &[("q", "quit")], &[]);
-        assert_eq!(screen.min_size(), (41, 24));
+        let screen = screen(&freeport(), &[("q", "quit")], &[]);
+        assert_eq!(screen.min_size(), (41, 23));
         let grid = screen.grid(80, 30);
         let text = to_plain_text(&grid);
         let lines: Vec<&str> = text.lines().collect();
@@ -658,18 +716,8 @@ mod tests {
         assert!(lines[1].trim_start().starts_with("▄▄▄"));
         assert_eq!(lines[28].trim(), "q quit");
         let board_top = lines.iter().position(|l| l.contains('┏')).unwrap();
-        assert_eq!(board_top, (30 - 14) / 2); // board, blank line and timeline are centered together
-        assert_eq!(lines[board_top].find('┏').map(|i| lines[board_top][..i].chars().count()), Some((80 - 29) / 2));
-        assert!(lines[board_top + 12].trim_start().starts_with("──┼")); // the axis, under the board
-    }
-
-    #[test]
-    fn turnstile_halves_are_red_and_blue() {
-        let game = Game::new(Level::parse(crate::levels::FREEPORT).unwrap());
-        let rows = render(&game);
-        assert_eq!(rows[3][10].color, Some(Color::Red)); // ╭
-        assert_eq!(rows[3][18].color, Some(Color::Blue)); // ╮
-        assert_eq!(rows[4][10].color, Some(Color::Red)); // red door
-        assert_eq!(rows[4][18].color, Some(Color::Blue)); // blue door
+        assert_eq!(board_top, (30 - 13) / 2); // board, blank line and timeline are centered together
+        assert_eq!(lines[board_top].find('┏').map(|i| lines[board_top][..i].chars().count()), Some((80 - 33) / 2 + 2));
+        assert!(lines[board_top + 11].trim_start().starts_with("──┼")); // the axis, under the board
     }
 }

@@ -188,7 +188,7 @@ mod tests {
     fn walks_out_of_the_exit() {
         let mut game = WebGame::new().unwrap();
         // Up to the glass, back to the turnstile, invert, then out of the exit door in the past.
-        let moves = [("east", 4), ("north", 4), ("east", 2), ("west", 2), ("south", 2), ("east", 9), ("north", 2), ("east", 1)];
+        let moves = [("east", 5), ("north", 4), ("east", 2), ("west", 2), ("south", 2), ("east", 9), ("north", 2), ("east", 2)];
         let mut last = String::new();
         for (dir, n) in moves {
             for _ in 0..n {
