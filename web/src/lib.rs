@@ -93,6 +93,7 @@ pub struct Cells {
     chars: Vec<u32>,
     fg: Vec<u8>,
     bg: Vec<u8>,
+    bold: Vec<u8>,
 }
 
 #[wasm_bindgen]
@@ -106,6 +107,7 @@ impl Cells {
             chars: vec![' ' as u32; width * height],
             fg: vec![0; width * height],
             bg: vec![0; width * height],
+            bold: vec![0; width * height],
         };
         for (y, row) in rows.iter().enumerate() {
             for (x, glyph) in row.iter().enumerate() {
@@ -113,6 +115,7 @@ impl Cells {
                 cells.chars[i] = glyph.ch as u32;
                 cells.fg[i] = palette_index(glyph.color);
                 cells.bg[i] = palette_index(glyph.bg);
+                cells.bold[i] = glyph.bold.into();
             }
         }
         cells
@@ -144,6 +147,12 @@ impl Cells {
     #[wasm_bindgen(getter)]
     pub fn bg(&self) -> Vec<u8> {
         self.bg.clone()
+    }
+
+    /// 1 where the glyph is bold (a `Uint8Array`).
+    #[wasm_bindgen(getter)]
+    pub fn bold(&self) -> Vec<u8> {
+        self.bold.clone()
     }
 }
 
@@ -191,6 +200,8 @@ mod tests {
         assert_eq!((title.width(), title.height()), (37, 7));
         assert_eq!(title.chars()[0], '▄' as u32);
         assert_eq!(title.fg()[0], palette_index(Some(Color::Slab)));
+        let diagonal = title.chars().iter().position(|&c| c == '╲' as u32).unwrap();
+        assert_eq!((title.bold()[diagonal], title.bold()[0]), (1, 0));
     }
 
     #[test]

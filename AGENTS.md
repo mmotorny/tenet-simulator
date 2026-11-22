@@ -35,7 +35,7 @@ Commands:
 | Doors (all doors) | `⠀` open → `⠉ ⠛ ⠿` → `⣿` closed (slide animation) | near-white |
 | Turnstile frame | `╭ ─ ╮ ╰ ╯` (thin, rounded) | red half / blue half |
 | Hint bar | keys bright, actions and `·` separators dim; arrows drawn as `←↑↓→` | near-white / dim gray |
-| Title logo | thin line art, reads the same rotated 180° (`T E N Ǝ ⊥`); `core/src/title.rs`. A bold block-letter version was tried and rejected | black ink on a white slab (as in the film); slab edges are `▄`/`▀` half-block rows |
+| Title logo | thin line art, reads the same rotated 180° (`T E N Ǝ ⊥`); verticals heavy and horizontals light like the film's logo (mixed-weight glyphs `┃ ┎ ┠ ┖ ┰ ┸`), diagonals bold via the `bold` attribute (Unicode has no heavy diagonal); `core/src/title.rs`. A bold block-letter version was tried and rejected | black ink on a white slab (as in the film); slab edges are `▄`/`▀` half-block rows |
 
 - Glass has **no solid junction glyphs** where it meets walls; the dotted rhythm reads as touching.
 - Rejected: dashed glass (`╎ ┊ ¦`), glass inside the turnstile, turnstile embedded in the outer wall, a partial glass wall, Braille as a full rendering surface.
@@ -73,5 +73,5 @@ Commands:
 - Diagrams must stay readable as plain text: the CLI honors `NO_COLOR`, and glyphs (not just color) distinguish forward from inverted.
 - Licensed BSD-3-Clause (`LICENSE`). Every source file starts with SPDX headers:
   `// SPDX-License-Identifier: BSD-3-Clause` and `// SPDX-FileCopyrightText: 2026 Maksym Motorny`.
-- Glyphs carry a foreground and an optional background color (`Glyph::bg`).
+- Glyphs carry a foreground color, an optional background color (`Glyph::bg`) and a `bold` flag (heavy stroke for diagonals; SGR bold in the terminal).
 - Like a terminal emulator, the web page paints block elements (`█ ▀ ▄ ▌ ▐`, quadrants) and box-drawing glyphs (lines, rounded corners, diagonals) itself instead of using font glyphs, so they join exactly across cells. The SVG export paints blocks and diagonals. Block quadrants: `view::block_quadrants` (mirrored in `web/www/main.js`).

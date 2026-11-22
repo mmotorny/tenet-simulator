@@ -54,21 +54,28 @@ pub struct Glyph {
     pub color: Option<Color>,
     /// Background color; `None` is the front end's default background.
     pub bg: Option<Color>,
+    /// Drawn heavier: bold text, or a heavy stroke for line glyphs that have no heavy variant
+    /// in Unicode (diagonals).
+    pub bold: bool,
 }
 
 impl Glyph {
-    pub const BLANK: Glyph = Glyph { ch: ' ', color: None, bg: None };
+    pub const BLANK: Glyph = Glyph { ch: ' ', color: None, bg: None, bold: false };
 
     pub const fn new(ch: char, color: Color) -> Self {
-        Self { ch, color: Some(color), bg: None }
+        Self { ch, color: Some(color), bg: None, bold: false }
     }
 
     pub const fn plain(ch: char, color: Option<Color>) -> Self {
-        Self { ch, color, bg: None }
+        Self { ch, color, bg: None, bold: false }
     }
 
     pub const fn on(ch: char, color: Option<Color>, bg: Color) -> Self {
-        Self { ch, color, bg: Some(bg) }
+        Self { ch, color, bg: Some(bg), bold: false }
+    }
+
+    pub const fn bold(self) -> Self {
+        Self { bold: true, ..self }
     }
 }
 
@@ -317,8 +324,8 @@ pub fn to_svg(rows: &[Vec<Glyph>]) -> String {
          Consolas, 'Liberation Mono', 'DejaVu Sans Mono', monospace\" font-size=\"{FONT}\" \
          text-anchor=\"middle\">\n<rect width=\"100%\" height=\"100%\" rx=\"6\" fill=\"#000\"/>\n"
     );
+    // Backgrounds first, in their own pass, so no cell's background covers a neighbour's glyph.
     for (y, row) in rows.iter().enumerate() {
-        let baseline = PAD + y as f32 * CELL_H + CELL_H * 0.75;
         for (x, glyph) in row.iter().enumerate() {
             if let Some(bg) = glyph.bg {
                 let (r, g, b) = bg.rgb();
@@ -329,6 +336,11 @@ pub fn to_svg(rows: &[Vec<Glyph>]) -> String {
                     PAD + y as f32 * CELL_H
                 ));
             }
+        }
+    }
+    for (y, row) in rows.iter().enumerate() {
+        let baseline = PAD + y as f32 * CELL_H + CELL_H * 0.75;
+        for (x, glyph) in row.iter().enumerate() {
             if glyph.ch == ' ' || glyph.ch == '\u{2800}' {
                 continue;
             }
@@ -355,9 +367,10 @@ pub fn to_svg(rows: &[Vec<Glyph>]) -> String {
                 let (left, right) = (cx - CELL_W / 2.0, cx + CELL_W / 2.0);
                 let (top, bottom) = (PAD + y as f32 * CELL_H, PAD + (y + 1) as f32 * CELL_H);
                 let (y1, y2) = if glyph.ch == '╲' { (top, bottom) } else { (bottom, top) };
+                let width = if glyph.bold { 2.4 } else { 1.2 };
                 svg.push_str(&format!(
                     "<line x1=\"{left}\" y1=\"{y1}\" x2=\"{right}\" y2=\"{y2}\" \
-                     stroke=\"rgb({r},{g},{b})\" stroke-width=\"1.2\"/>\n"
+                     stroke=\"rgb({r},{g},{b})\" stroke-width=\"{width}\" stroke-linecap=\"square\"/>\n"
                 ));
                 continue;
             }
@@ -442,7 +455,7 @@ mod tests {
         let lines: Vec<&str> = text.lines().collect();
         // Title slab (37 wide) is the widest block; the 29-wide map is indented by 4, the label hangs.
         assert!(lines[0].starts_with("▄▄▄▄"));
-        assert!(lines[1].starts_with("  ╶─┬─╴"));
+        assert!(lines[1].starts_with("  ╶─┰─╴"));
         assert!(lines[8].starts_with("    ┏━━"));
         assert!(lines[10].ends_with("⠀    t = 0 ▲"));
         assert_eq!(lines.last().unwrap().trim(), "q quit");

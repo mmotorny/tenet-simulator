@@ -18,7 +18,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifier
 use crossterm::{cursor, execute, queue, terminal};
 use tenet_core::game::{Dir, Game, Status, StepOutcome};
 use tenet_core::level::Level;
-use tenet_core::view::{self, Color, Glyph};
+use tenet_core::view::{self, Glyph};
 
 const DEFAULT_LEVEL: &str = tenet_core::levels::FREEPORT;
 
@@ -55,10 +55,14 @@ fn parse_args() -> Result<Options, String> {
 
 const USAGE: &str = "usage: tenet [--moves wasd...] [--trace | --svg] [--no-color] [LEVEL_FILE]";
 
-fn paint(out: &mut String, text: &str, color: Option<Color>, bg: Option<Color>, enabled: bool) {
-    if !enabled || (color.is_none() && bg.is_none()) {
+fn paint(out: &mut String, text: &str, glyph: &Glyph, enabled: bool) {
+    let Glyph { color, bg, bold, .. } = *glyph;
+    if !enabled || (color.is_none() && bg.is_none() && !bold) {
         out.push_str(text);
         return;
+    }
+    if bold {
+        out.push_str("\x1b[1m");
     }
     if let Some(c) = color {
         let (r, g, b) = c.rgb();
@@ -82,10 +86,10 @@ fn screen(game: &Game) -> view::Screen {
 /// A row of glyphs as optionally colored text.
 fn line(row: &[Glyph], color: bool) -> String {
     let mut out = String::new();
-    // Group runs of the same colors to keep escape sequences short.
-    for run in row.chunk_by(|a, b| (a.color, a.bg) == (b.color, b.bg)) {
+    // Group runs of the same attributes to keep escape sequences short.
+    for run in row.chunk_by(|a, b| (a.color, a.bg, a.bold) == (b.color, b.bg, b.bold)) {
         let text: String = run.iter().map(|g| g.ch).collect();
-        paint(&mut out, &text, run[0].color, run[0].bg, color);
+        paint(&mut out, &text, &run[0], color);
     }
     out
 }

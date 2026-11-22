@@ -9,13 +9,16 @@
 
 use crate::view::{Color, Glyph};
 
-const T: [&str; 5] = ["╶─┬─╴", "  │  ", "  │  ", "  │  ", "  │  "];
-const E: [&str; 5] = ["┌───", "│   ", "├── ", "│   ", "└───"];
-const N: [&str; 5] = ["│╲    │", "│ ╲   │", "│  ╲  │", "│   ╲ │", "│    ╲│"];
+// As in the film's logo, vertical strokes are heavier than horizontal ones: mixed-weight
+// box-drawing glyphs (heavy vertical, light horizontal). Diagonals are bold too, but Unicode has
+// no heavy diagonal, so they carry the bold attribute instead.
+const T: [&str; 5] = ["╶─┰─╴", "  ┃  ", "  ┃  ", "  ┃  ", "  ┃  "];
+const E: [&str; 5] = ["┎───", "┃   ", "┠── ", "┃   ", "┖───"];
+const N: [&str; 5] = ["┃╲    ┃", "┃ ╲   ┃", "┃  ╲  ┃", "┃   ╲ ┃", "┃    ╲┃"];
 /// E rotated 180°.
-const E_INV: [&str; 5] = ["───┐", "   │", " ──┤", "   │", "───┘"];
+const E_INV: [&str; 5] = ["───┒", "   ┃", " ──┨", "   ┃", "───┚"];
 /// T rotated 180°.
-const T_INV: [&str; 5] = ["  │  ", "  │  ", "  │  ", "  │  ", "╶─┴─╴"];
+const T_INV: [&str; 5] = ["  ┃  ", "  ┃  ", "  ┃  ", "  ┃  ", "╶─┸─╴"];
 
 const LETTER_SPACING: usize = 2;
 /// Slab padding left and right of the letters, in cells. Above and below, the slab extends by a
@@ -38,7 +41,10 @@ pub fn logo() -> Vec<Vec<Glyph>> {
     let mut logo = vec![edge('▄')];
     for row in rows {
         let mut line: Vec<Glyph> = pad().collect();
-        line.extend(row.chars().map(|ch| Glyph::on(ch, (ch != ' ').then_some(Color::Ink), Color::Slab)));
+        line.extend(row.chars().map(|ch| {
+            let glyph = Glyph::on(ch, (ch != ' ').then_some(Color::Ink), Color::Slab);
+            if ch == '╲' { glyph.bold() } else { glyph }
+        }));
         line.extend(pad());
         logo.push(line);
     }
@@ -67,7 +73,15 @@ mod tests {
             '┴' => '┬',
             '╴' => '╶',
             '╶' => '╴',
-            other => other, // ─ │ ╲ and space are symmetric
+            '┎' => '┚',
+            '┚' => '┎',
+            '┒' => '┖',
+            '┖' => '┒',
+            '┠' => '┨',
+            '┨' => '┠',
+            '┰' => '┸',
+            '┸' => '┰',
+            other => other, // ─ │ ┃ ╲ and space are symmetric
         }
     }
 
@@ -92,5 +106,6 @@ mod tests {
         assert!(rows[6].iter().all(|g| g.ch == '▀' && g.color == Some(Color::Slab) && g.bg.is_none()));
         assert!(rows[1..6].iter().flatten().all(|g| g.bg == Some(Color::Slab)));
         assert!(rows[1..6].iter().flatten().filter(|g| g.ch != ' ').all(|g| g.color == Some(Color::Ink)));
+        assert!(rows[1..6].iter().flatten().all(|g| g.bold == (g.ch == '╲'))); // only diagonals are bold
     }
 }

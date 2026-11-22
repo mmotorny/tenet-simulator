@@ -20,6 +20,9 @@ body {
 
 /* Title at the top, board in the middle, hint bar at the bottom, each centered. */
 #term {
+  /* Own stacking context, so cell background layers (z-index -1) stay above the page background. */
+  position: relative;
+  z-index: 0;
   box-sizing: border-box;
   height: 100%;
   padding: 1lh 1ch;
@@ -33,8 +36,9 @@ body {
   font-size: 13.6px;
   line-height: 1.25;
   /* Stroke widths for painted box-drawing lines. */
-  --light: max(1px, 0.08em);
-  --heavy: max(2px, 0.16em);
+  /* Whole pixels, so painted lines stay crisp. */
+  --light: round(max(1px, 0.08em), 1px);
+  --heavy: round(max(2px, 0.16em), 1px);
   white-space: pre;
 }
 
@@ -98,6 +102,15 @@ body {
 
 #term span.path path {
   vector-effect: non-scaling-stroke;
+}
+
+#term span.bold {
+  font-weight: bold;
+}
+
+/* Unicode has no heavy diagonals; bold diagonals get the heavy stroke. */
+#term span.path.bold svg {
+  stroke-width: var(--heavy);
 }
 
 .red { color: rgb(230 70 60); }
