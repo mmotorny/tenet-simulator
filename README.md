@@ -9,7 +9,7 @@ The world is a 2D top-down grid with discrete time and space, played on hand-des
 
 **Play in the browser:** https://mmotorny.github.io/tenet-simulator/
 
-![The perfect play of the first room: in through the west door, through the turnstile, across the mirror and back out through the east door in the past, finishing at t = 0 as the run began; then the winning logo flip and the tape of consciousness rewinding](docs/demo.svg)
+[![The perfect play of the first room: in through the west door, through the turnstile, across the mirror and back out through the east door in the past, finishing at t = 0 as the run began; then the winning logo flip and the tape of consciousness rewinding](docs/demo.svg)](https://mmotorny.github.io/tenet-simulator/)
 
 ## How it plays
 
