@@ -44,7 +44,7 @@ impl WebGame {
     }
 
     /// Moves the protagonist: `dir` is "north", "south", "east" or "west".
-    /// Returns "moved", "blocked" or "exited".
+    /// Returns "moved", "inverted", "blocked" or "exited".
     pub fn step(&mut self, dir: &str) -> Result<String, JsError> {
         let dir = match dir {
             "north" => Dir::North,
@@ -55,14 +55,15 @@ impl WebGame {
         };
         Ok(match self.game.step(dir) {
             StepOutcome::Moved => "moved",
+            StepOutcome::Inverted => "inverted",
             StepOutcome::Blocked => "blocked",
             StepOutcome::Exited => "exited",
         }
         .to_string())
     }
 
-    pub fn turn(&self) -> u32 {
-        self.game.turn()
+    pub fn moves(&self) -> u32 {
+        self.game.moves()
     }
 
     pub fn exited(&self) -> bool {
@@ -186,7 +187,8 @@ mod tests {
     #[test]
     fn walks_out_of_the_exit() {
         let mut game = WebGame::new().unwrap();
-        let moves = [("east", 4), ("north", 2), ("east", 9), ("north", 2), ("east", 1)];
+        // Up to the glass, back to the turnstile, invert, then out of the exit door in the past.
+        let moves = [("east", 4), ("north", 4), ("east", 2), ("west", 2), ("south", 2), ("east", 9), ("north", 2), ("east", 1)];
         let mut last = String::new();
         for (dir, n) in moves {
             for _ in 0..n {
@@ -196,7 +198,7 @@ mod tests {
         assert_eq!(last, "exited");
         assert!(game.exited());
         game.reset();
-        assert_eq!((game.turn(), game.exited()), (0, false));
+        assert_eq!((game.moves(), game.exited()), (0, false));
     }
 
     #[test]

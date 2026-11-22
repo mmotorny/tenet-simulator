@@ -260,12 +260,18 @@ fn main() -> ExitCode {
 mod tests {
     use super::*;
 
-    /// Regenerate with: cargo run -q -- --svg > docs/screenshot.svg
+    /// The README screenshot: mid-run, inverted, with the forward self replaying at the same moment.
+    const README_MOVES: &str = "ddddwwwwddaassdddddd";
+
+    /// Regenerate with: cargo run -q -- --svg --moves ddddwwwwddaassdddddd > docs/screenshot.svg
     #[test]
     fn readme_screenshot_is_up_to_date() {
         let level = Level::parse(DEFAULT_LEVEL).unwrap();
-        let expected = svg_frame(Game::new(level), "").unwrap();
+        let expected = svg_frame(Game::new(level), README_MOVES).unwrap();
         let committed = include_str!("../../docs/screenshot.svg");
-        assert!(committed == expected, "docs/screenshot.svg is stale; run: cargo run -q -- --svg > docs/screenshot.svg");
+        assert!(
+            committed == expected,
+            "docs/screenshot.svg is stale; run: cargo run -q -- --svg --moves {README_MOVES} > docs/screenshot.svg"
+        );
     }
 }

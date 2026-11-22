@@ -7,3 +7,6 @@ W....TTTTT....W
 E......g......W
 W......g......W
 WWWWWWWWWWWWWWW
+
+exit-closes: 9
+timeline: -2..22

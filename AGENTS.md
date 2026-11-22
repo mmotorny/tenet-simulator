@@ -4,7 +4,14 @@ A simulator of strong determinism and time inversion, inspired by Nolan's *Tenet
 
 - 2D top-down, discrete time and space, pre-designed levels.
 - Two targets: **terminal** (so the user and the agent can discuss diagrams in text) and **web** (for sharing).
-- Status: simple movement only (no time mechanics). The turnstile is a plain passage for now.
+- Status: inversion works, with a timeline. Consistency is lenient: past selves replay but aren't obstacles, and observations aren't checked yet.
+
+## Rules (`core/src/game.rs`)
+
+- Each move advances the protagonist's own time by one and global time by their arrow: +1 forward, −1 inverted.
+- The turnstile's mirror (the booth's middle cell, halfway between its red and blue doors) reverses the arrow when stepped onto.
+- The worldline is a list of segments, one per stretch between inversions. Earlier segments replay as other selves at the current global time (dimmer colors). At an inversion moment only the self leaving the mirror is shown.
+- Level properties after the map: `exit-closes: 9` (exit door open for t < 9, walkable only while open, drawn by the current time) and `timeline: -2..22`.
 
 ## Code layout
 
@@ -17,7 +24,7 @@ A simulator of strong determinism and time inversion, inspired by Nolan's *Tenet
 Commands:
 - `cargo run` — play interactively (arrows / wasd / hjkl, `r` to restart, `q` or `Esc` to quit). The screen is centered: title logo at the top, board in the middle, hint bar at the bottom.
 - `cargo run -- --moves ddddww --trace` — scripted run that prints every frame (without the title). Use this to discuss runs as text.
-- `cargo run -q -- --svg > docs/screenshot.svg` — regenerate the README screenshot; a test fails while it is stale. GitHub can't align glyph rows in Markdown code blocks (font fallback), hence the SVG.
+- `cargo run -q -- --svg --moves ddddwwwwddaassdddddd > docs/screenshot.svg` — regenerate the README screenshot (mid-run, inverted); a test fails while it is stale. GitHub can't align glyph rows in Markdown code blocks (font fallback), hence the SVG.
 - `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings` — keep both clean (CI enforces it).
 
 ## Visual vocabulary
@@ -28,12 +35,13 @@ Commands:
 
 | Element | Glyph | Color |
 |---|---|---|
-| Forward self / inverted self | `●` / `○` | red / blue |
+| Forward self / inverted self | `●` / `○` | red / blue; earlier selves replaying in dim red / dim blue |
 | Room walls | `┏ ━ ┓ ┃ ┗ ┛` (heavy) | gray |
 | Floor | `·` | dark gray |
 | Glass | `⋮` vertical, `⋯` horizontal (midline) | pale |
 | Doors (all doors) | `⠀` open → `⠉ ⠛ ⠿` → `⣿` closed (slide animation) | near-white |
 | Turnstile frame | `╭ ─ ╮ ╰ ╯` (thin, rounded) | red half / blue half |
+| Timeline | under the board: global-time axis (ticks every 5, `⣿` where the exit closes), `▼` + current time colored by arrow, one swimlane per segment (newest at the bottom; `━`, corners `┓┛` / `┏┗` connect lanes at inversions; `●`/`○` where each self is now) | active lane red/blue, earlier lanes dim |
 | Hint bar | keys bright, actions and `·` separators dim; arrows drawn as `←↑↓→` | near-white / dim gray |
 | Title logo | 3 rows, letters roughly square like the poster, reading the same rotated 180° (`T E N Ǝ ⊥`): block stems (`▄ █ ▀`), heavy bars (`━ ╺ ╸`), N with heavy-line verticals (`╻ ┃ ╹`) and an evenly stepped quadrant-block diagonal; `core/src/title.rs`. Rejected: thin line art, 5-row block letters, light lines on the slab (too thin) | black ink on a white slab (as in the film); slab edges are `▄`/`▀` half-block rows |
 
@@ -44,7 +52,7 @@ Commands:
 
 - A freestanding booth with **two doors** (red side, blue side) and an **empty interior**: no partition, no midline.
 - Physically it would act as an invisible mirror: a surface that leads you into the past. To an outside observer, your forward self and your inverted self converge on it and annihilate (and emerge in pairs when leaving inversion). The film's booth hides that visual paradox.
-- Open question: where exactly inside the booth inversion happens, and how many steps walking through takes.
+- Inversion happens on the mirror, the booth's middle cell.
 
 ## Prototype level
 
@@ -63,7 +71,7 @@ Commands:
 - A full north–south glass wall splits the room (as in the freeport scene); the turnstile sits across it and is the only crossing.
 - Enter through the west door. The east door is on a timer: open for all t < 9, closed afterwards.
 - Solution: invert through the turnstile and walk out of the east door in the past.
-- Timing needs recomputing once the booth-traversal rule is fixed.
+- Solution: up to the glass (watch the door close at t = 9), back to the turnstile, invert on the mirror, and walk out of the exit before t = 9. Because inverted moves run global time backward, any route through the turnstile eventually reaches an open door; the level teaches the mechanics rather than being hard.
 - Open question: observation consistency (the forward self sees the inverted self through the glass). Recommendation: lenient during play, then replay the full consistent history after solving.
 
 ## Working agreements
