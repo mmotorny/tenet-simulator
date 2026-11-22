@@ -9,15 +9,17 @@ The world is a 2D top-down grid with discrete time and space, played on hand-des
 
 **Play in the browser:** https://mmotorny.github.io/tenet-simulator/
 
-[![The perfect play of the first room: in through the west door, through the turnstile, across the mirror and back out through the east door in the past, finishing at t = 0 as the run began; then the winning logo flip and the tape of consciousness rewinding](docs/demo.svg)](https://mmotorny.github.io/tenet-simulator/)
+[![The perfect play of the first room: your future self waits on the finish from the start; you go in through the west door, through the turnstile, across the mirror and back out through the east door in the past, finishing at t = 0 as the run began, with strong determinism; then the logo flip and the tape of consciousness rewinding](docs/demo.svg)](https://mmotorny.github.io/tenet-simulator/)
 
 ## How it plays
 
 You start on `▶` outside the west door and finish by stepping onto `■` outside the east door. Both doors close at t = 3, long before you can reach the east one, and a glass wall splits the room anyway.
 
-The way through is the turnstile. Walk in through its red door and cross the invisible mirror in the middle: you become inverted, and from then on every move takes you one step back in global time. Your earlier self keeps replaying on the board, and the timeline under the board shows each stretch of your worldline as a swimlane. The perfect run is a palindrome: you leave at t = 0, at the very moment you arrived.
+The way through is the turnstile. Walk in through its red door and cross the invisible mirror in the middle: you become inverted, and from then on every move takes you one step back in global time. The perfect run is a palindrome: you leave at t = 0, at the very moment you arrived.
 
-Each level has a par, the fewest moves that finish it, shown as `moves/par`: `✓` when you finish within it, `✗` once you pass it. After winning, your worldline becomes a tape of consciousness you can rewind and replay.
+The universe is strongly deterministic. It always shows one consistent history: your lived past plus the rest of it, predicted by a solver. So your future, inverted self is there from the first moment, standing on `■`, and walks backward to meet you at the mirror. Deviate and the universe finds another consistent history; break your own past (say, by closing a door your earlier self already walked through) and it collapses in a paradox. The timeline under the board shows each stretch of your worldline as a swimlane, dashed where it's still only predicted.
+
+Each level has a par, the fewest moves that finish it, shown as `moves/par`: `✓` when you finish within it, `✗` once you pass it. Live your future selves exactly as you first saw them, by memory and mirrored in time, and you earn *strong determinism*. After winning, your worldline becomes a tape of consciousness you can rewind and replay.
 
 ## Legend
 
@@ -28,7 +30,7 @@ Each level has a par, the fewest moves that finish it, shown as `moves/par`: `�
 | `╭───╮` | turnstile: red half forward, blue half inverted; each door closes while someone stands next to the mirror on its side |
 | `⠀` → `⣿` | door, open → closed |
 | `▶` / `■` | start / finish |
-| `━` `┓┛` `╋` | timeline: a swimlane, an inversion joining two lanes, passing through a door |
+| `━` `╌` `┓┛` `╋` | timeline: a lived swimlane, a predicted one, an inversion joining two lanes, passing through a door |
 
 Without color, inverted selves are drawn as diamonds (`◆` / `◇`).
 

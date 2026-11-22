@@ -85,8 +85,10 @@ const PLAYING_HINTS: &[view::Hint] =
 const EXITED_HINTS: &[view::Hint] =
     &[("j", "rewind"), ("k", "pause"), ("l", "play"), (", .", "step"), ("u", "undo"), ("r", "restart"), ("?", "legend"), ("q esc", "quit")];
 
+const PARADOX_HINTS: &[view::Hint] = &[("u", "undo"), ("r", "restart"), ("q esc", "quit")];
+
 fn screen(session: &Session) -> view::Screen {
-    session.screen(PLAYING_HINTS, EXITED_HINTS)
+    session.screen(PLAYING_HINTS, EXITED_HINTS, PARADOX_HINTS)
 }
 
 /// A row of glyphs as optionally colored text. Without color, glyphs that rely on color to carry
@@ -205,7 +207,7 @@ fn draw(session: &Session, color: bool) -> io::Result<()> {
     for view::Placement { x, y, row } in screen.layout(cols as usize, rows as usize) {
         if y < rows as usize {
             queue!(out, cursor::MoveTo(x as u16, y as u16))?;
-            write!(out, "{}", line(row, color))?;
+            write!(out, "{}", line(&row, color))?;
         }
     }
     out.flush()

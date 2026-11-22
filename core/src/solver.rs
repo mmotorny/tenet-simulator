@@ -1,56 +1,53 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // SPDX-FileCopyrightText: 2026 Maksym Motorny
 
-//! Shortest solutions, for a level's par (the fewest moves that finish it).
+//! Shortest solutions: a level's par (the fewest moves that finish it), and the predicted
+//! completion of a game in progress (the rest of the history the universe would have).
 //!
-//! A breadth-first search over game states. Two states are the same if the protagonist is in the
-//! same place, at the same global time, with the same arrow, and earlier selves stand on the
-//! turnstile's trapdoors at the same times (the only way the past affects what's possible).
+//! Plain breadth-first pathfinding over (position, global time, arrow).
 
 use std::collections::{HashSet, VecDeque};
 
 use crate::game::{Arrow, Dir, Game, Status, StepOutcome};
 use crate::level::{Level, Pos};
 
-/// How far from global time 0 the search explores; beyond it, nothing new can happen in a level
-/// whose events all sit near the start.
-const TIME_LIMIT: i32 = 64;
 
-#[derive(Clone, PartialEq, Eq, Hash)]
-struct Key {
+/// A search state: where the protagonist is, when, and which way their time runs.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct Place {
     player: Pos,
     now: i32,
     arrow: Arrow,
-    trapdoors: Vec<(Pos, i32)>,
-}
-
-fn key(game: &Game) -> Key {
-    let trapdoors = game.level().turnstile().map_or_else(Vec::new, |t| {
-        let mut occupied: Vec<(Pos, i32)> = game
-            .segments()
-            .iter()
-            .flat_map(|s| s.path.iter().enumerate().map(move |(i, &p)| (p, s.start + i as i32 * s.arrow.dt())))
-            .filter(|&(p, _)| p == t.red_cell || p == t.blue_cell)
-            .collect();
-        occupied.sort_by_key(|&(p, t)| (p.x, p.y, t));
-        occupied
-    });
-    Key { player: game.player(), now: game.now(), arrow: game.arrow(), trapdoors }
 }
 
 /// The moves of a shortest solution, or `None` if the level can't be finished within `max_moves`.
 pub fn shortest_solution(level: &Level, max_moves: usize) -> Option<Vec<Dir>> {
-    let start = Game::new(level.clone());
-    let mut seen = HashSet::from([key(&start)]);
-    let mut queue = VecDeque::from([(start, Vec::new())]);
-    while let Some((game, moves)) = queue.pop_front() {
+    completion(&Game::new(level.clone()), max_moves)
+}
+
+/// The fewest further moves that finish `game`: plain pathfinding over (position, global time,
+/// arrow), visiting each once, with every move checked by the game's own rules.
+pub fn completion(game: &Game, max_moves: usize) -> Option<Vec<Dir>> {
+    if game.status() == Status::Exited {
+        return Some(Vec::new());
+    }
+    // Global time the search may explore: around the level's own window and the current time,
+    // widened by the number of cells, so no path is cut short by the bounds (which only keep the
+    // search finite).
+    let level = game.level();
+    let cells = level.width() * level.height();
+    let (lo, hi) = level.timeline();
+    let window = (lo.min(game.now()) - cells)..=(hi.max(game.now()) + cells);
+    let place = |g: &Game| Place { player: g.player(), now: g.now(), arrow: g.arrow() };
+    let mut seen = HashSet::from([place(game)]);
+    let mut queue = VecDeque::from([(game.clone(), Vec::new())]);
+    while let Some((state, moves)) = queue.pop_front() {
         if moves.len() >= max_moves {
             continue;
         }
         for dir in [Dir::North, Dir::South, Dir::East, Dir::West] {
-            let mut next = game.clone();
-            let outcome = next.step(dir);
-            if outcome == StepOutcome::Blocked || next.now().abs() > TIME_LIMIT {
+            let mut next = state.clone();
+            if next.step(dir) == StepOutcome::Blocked || !window.contains(&next.now()) {
                 continue;
             }
             let mut path = moves.clone();
@@ -58,7 +55,7 @@ pub fn shortest_solution(level: &Level, max_moves: usize) -> Option<Vec<Dir>> {
             if next.status() == Status::Exited {
                 return Some(path);
             }
-            if seen.insert(key(&next)) {
+            if seen.insert(place(&next)) {
                 queue.push_back((next, path));
             }
         }
@@ -104,6 +101,7 @@ mod tests {
     fn reports_unsolvable_levels() {
         let level = Level::parse("SE.WXF").unwrap();
         assert_eq!(par(&level, 20), None);
+        assert_eq!(completion(&Game::new(level), 20), None);
     }
 }
 

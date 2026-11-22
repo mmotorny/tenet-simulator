@@ -242,6 +242,21 @@ impl Painter<'_> {
     }
 }
 
+/// The universe collapsing: a growing, deterministic scatter of the board's cells turns to static,
+/// sparing the selves.
+fn dissolve(rows: &mut [Vec<Glyph>], stage: u32) {
+    const NOISE: [char; 3] = ['░', '▒', '▓'];
+    for (y, row) in rows.iter_mut().enumerate() {
+        for (x, glyph) in row.iter_mut().enumerate() {
+            let hash = (x as u32).wrapping_mul(2_654_435_761) ^ (y as u32).wrapping_mul(40_503) ^ stage.wrapping_mul(97);
+            // The selves stay visible: the paradox is about them.
+            if glyph.ch != ' ' && !matches!(glyph.ch, '●' | '○') && hash % 8 < stage {
+                *glyph = Glyph::new(NOISE[(hash / 8 % 3) as usize], Color::Wall);
+            }
+        }
+    }
+}
+
 /// Renders the current game state as rows of `2 * width - 1` glyphs.
 pub fn render(game: &Game) -> Vec<Vec<Glyph>> {
     render_with(game, &[])
@@ -269,6 +284,7 @@ fn render_frame(game: &Game, extras: &Extras) -> Vec<Vec<Glyph>> {
         (Some(lo), Some(hi)) => (lo + hi) / 2,
         _ => 0,
     };
+    let collapse = extras.collapse;
     let painter = Painter {
         game,
         turnstile_split,
@@ -277,7 +293,7 @@ fn render_frame(game: &Game, extras: &Extras) -> Vec<Vec<Glyph>> {
         door_overrides: extras.door_overrides,
     };
 
-    (0..level.height())
+    let mut rows: Vec<Vec<Glyph>> = (0..level.height())
         .map(|y| {
             let mut row = Vec::with_capacity((level.width() * 2 - 1) as usize);
             for x in 0..level.width() {
@@ -288,7 +304,11 @@ fn render_frame(game: &Game, extras: &Extras) -> Vec<Vec<Glyph>> {
             }
             row
         })
-        .collect()
+        .collect();
+    if let Some(stage) = collapse {
+        dissolve(&mut rows, stage);
+    }
+    rows
 }
 
 fn text(s: &str, color: Option<Color>) -> Vec<Glyph> {
@@ -330,11 +350,11 @@ pub struct Screen {
 /// happened. Lanes also mark the level's start and finish and every passage through a room door,
 /// and show where each self is at the current time, if it exists then.
 pub fn timeline(game: &Game) -> (Vec<Vec<Glyph>>, usize) {
-    timeline_at(game, None)
+    timeline_at(game, None, None)
 }
 
 /// The timeline, marking a moment of the replay instead of the current time if given.
-fn timeline_at(game: &Game, replay: Option<Replay>) -> (Vec<Vec<Glyph>>, usize) {
+fn timeline_at(game: &Game, replay: Option<Replay>, lived: Option<(usize, usize)>) -> (Vec<Vec<Glyph>>, usize) {
     let level = game.level();
     let segments = game.segments();
     let (mut lo, mut hi) = level.timeline();
@@ -408,6 +428,8 @@ fn timeline_at(game: &Game, replay: Option<Replay>) -> (Vec<Vec<Glyph>>, usize) 
                 Glyph::new(FINISH, Color::Key)
             } else if level.tile(*pos).is_some_and(Tile::is_room_door) {
                 Glyph::new(DOOR_PASSAGE, Color::Door)
+            } else if lived.is_some_and(|(segs, len)| i + 1 > segs || (i + 1 == segs && step >= len)) {
+                Glyph::new('╌', color) // predicted, not lived yet
             } else {
                 Glyph::new('━', color)
             };
@@ -455,6 +477,11 @@ pub struct Extras<'a> {
     pub title: Option<&'a [Vec<Glyph>]>,
     /// Show the legend in place of the timeline.
     pub legend: bool,
+    /// How much of the shown history has been lived: the number of segments, and the length of
+    /// the last lived one. The rest is predicted, drawn dashed on the timeline.
+    pub lived: Option<(usize, usize)>,
+    /// The universe collapsing after a paradox: how far along (cells dissolve as it grows).
+    pub collapse: Option<u32>,
 }
 
 /// The legend for the map: what its symbols mean, in two columns, each symbol in its real colors.
@@ -530,29 +557,90 @@ fn move_counter(game: &Game, par: Option<u32>) -> Vec<Glyph> {
     line
 }
 
-/// Like [`screen`], with the extras of one frame.
-pub fn screen_with(game: &Game, playing: &[Hint], exited: &[Hint], extras: &Extras) -> Screen {
-    let board = render_frame(game, extras);
-    let board_width = board.first().map_or(0, Vec::len);
-    let (timeline, timeline_width) = if extras.legend { legend(&board) } else { timeline_at(game, extras.replay) };
+/// The status line: the move counter, then the hints for the game's state.
+pub fn status_line(game: &Game, playing: &[Hint], exited: &[Hint], par: Option<u32>) -> Vec<Glyph> {
     let rest = match game.status() {
         Status::Playing => playing,
         Status::Exited => exited,
     };
-    let mut status = move_counter(game, extras.par);
+    let mut status = move_counter(game, par);
     if !rest.is_empty() {
         status.extend(text(" · ", Some(Color::Hint)));
         status.extend(hints(rest));
     }
+    status
+}
+
+/// Text in one color, as glyphs.
+pub fn colored(s: &str, color: Color) -> Vec<Glyph> {
+    text(s, Some(color))
+}
+
+/// Hints as glyphs: keys bright, actions dim.
+pub fn hint_glyphs(list: &[Hint]) -> Vec<Glyph> {
+    hints(list)
+}
+
+/// Like [`screen`], with the extras of one frame.
+pub fn screen_with(game: &Game, playing: &[Hint], exited: &[Hint], extras: &Extras) -> Screen {
+    let board = render_frame(game, extras);
+    let board_width = board.first().map_or(0, Vec::len);
+    let (timeline, timeline_width) =
+        if extras.legend { legend(&board) } else { timeline_at(game, extras.replay, extras.lived) };
+    let status = status_line(game, playing, exited, extras.par);
     let title = extras.title.map_or_else(crate::title::logo, <[Vec<Glyph>]>::to_vec);
     Screen { title, board, board_width, timeline, timeline_width, status }
 }
 
 /// A row of glyphs placed at a cell position on a screen.
-pub struct Placement<'a> {
+pub struct Placement {
     pub x: usize,
     pub y: usize,
-    pub row: &'a [Glyph],
+    pub row: Vec<Glyph>,
+}
+
+/// Breaks a status line into lines of at most `width` cells, like reflowing text: between its
+/// ` · `-separated items (dropping the separator at each break), and inside an item only if it
+/// alone is too wide.
+pub fn wrap_status(status: &[Glyph], width: usize) -> Vec<Vec<Glyph>> {
+    let width = width.max(1);
+    let mut items: Vec<&[Glyph]> = Vec::new();
+    let mut start = 0;
+    let mut i = 0;
+    while i + 2 < status.len() {
+        if status[i].ch == ' ' && status[i + 1].ch == '·' && status[i + 2].ch == ' ' {
+            items.push(&status[start..i]);
+            start = i + 3;
+            i += 3;
+        } else {
+            i += 1;
+        }
+    }
+    items.push(&status[start..]);
+
+    let separator = text(" · ", Some(Color::Hint));
+    let mut lines: Vec<Vec<Glyph>> = Vec::new();
+    let mut line: Vec<Glyph> = Vec::new();
+    for item in items {
+        if !line.is_empty() && line.len() + separator.len() + item.len() <= width {
+            line.extend_from_slice(&separator);
+            line.extend_from_slice(item);
+            continue;
+        }
+        if !line.is_empty() {
+            lines.push(std::mem::take(&mut line));
+        }
+        for chunk in item.chunks(width) {
+            if line.len() == width || (!line.is_empty() && chunk.len() == width) {
+                lines.push(std::mem::take(&mut line));
+            }
+            line.extend_from_slice(chunk);
+        }
+    }
+    if !line.is_empty() || lines.is_empty() {
+        lines.push(line);
+    }
+    lines
 }
 
 impl Screen {
@@ -573,21 +661,27 @@ impl Screen {
     /// margin. The timeline is centered on its axis, so its overhanging label needs room on both
     /// sides.
     pub fn min_size(&self) -> (usize, usize) {
+        // The status line reflows, so it doesn't widen the screen; it may take more lines instead.
         let width = self
             .title_width()
-            .max(self.status.len())
             .max(self.board_width)
             .max(self.timeline_width + 2 * self.timeline_overhang());
-        (width + 2, 1 + self.title.len() + 1 + self.middle_height() + 1 + 1 + 1)
+        let status_lines = wrap_status(&self.status, width).len();
+        (width + 2, 1 + self.title.len() + 1 + self.middle_height() + 1 + status_lines + 1)
     }
 
     /// Lays the screen out on a `cols` × `rows` grid like a full-screen terminal app: title at
     /// the top, status at the bottom, board and timeline centered in between, each centered
     /// horizontally. Rows may extend past the right edge; a front end clips them.
-    pub fn layout(&self, cols: usize, rows: usize) -> Vec<Placement<'_>> {
+    pub fn layout(&self, cols: usize, rows: usize) -> Vec<Placement> {
+        let status = wrap_status(&self.status, cols.saturating_sub(2));
         let (title_h, middle_h) = (self.title.len(), self.middle_height());
-        let needed = 1 + title_h + 1 + middle_h + 1 + 1 + 1;
-        let (title_y, status_y) = if rows >= needed { (1, rows - 2) } else { (0, title_h + 1 + middle_h + 1) };
+        let needed = 1 + title_h + 1 + middle_h + 1 + status.len() + 1;
+        let (title_y, status_y) = if rows >= needed {
+            (1, rows - 1 - status.len())
+        } else {
+            (0, title_h + 1 + middle_h + 1)
+        };
         let middle_y = {
             let lo = title_y + title_h + 1;
             let hi = status_y.saturating_sub(middle_h + 1).max(lo);
@@ -598,15 +692,17 @@ impl Screen {
 
         let mut placed = Vec::new();
         for (i, row) in self.title.iter().enumerate() {
-            placed.push(Placement { x: centered(self.title_width()), y: title_y + i, row });
+            placed.push(Placement { x: centered(self.title_width()), y: title_y + i, row: row.clone() });
         }
         for (i, row) in self.board.iter().enumerate() {
-            placed.push(Placement { x: centered(self.board_width), y: middle_y + i, row });
+            placed.push(Placement { x: centered(self.board_width), y: middle_y + i, row: row.clone() });
         }
         for (i, row) in self.timeline.iter().enumerate() {
-            placed.push(Placement { x: centered(self.timeline_width), y: timeline_y + i, row });
+            placed.push(Placement { x: centered(self.timeline_width), y: timeline_y + i, row: row.clone() });
         }
-        placed.push(Placement { x: centered(self.status.len()), y: status_y, row: &self.status });
+        for (i, row) in status.into_iter().enumerate() {
+            placed.push(Placement { x: centered(row.len()), y: status_y + i, row });
+        }
         placed
     }
 
@@ -887,6 +983,16 @@ mod tests {
         // Only symbols on the board are explained.
         let bare = Game::new(Level::parse("SE.XF").unwrap());
         assert_eq!(plain(&legend(&render(&bare)).0), ["● ◆  you now            ○ ◇  you another time", "⣿    closed door        ▶ ■  start, finish"]);
+    }
+
+    #[test]
+    fn the_status_line_reflows_between_items() {
+        let status = text("12/19 moves · ←↑↓→ wasd move · u undo · r restart", Some(Color::Hint));
+        let lines = |w| wrap_status(&status, w).iter().map(|l| l.iter().map(|g| g.ch).collect::<String>()).collect::<Vec<_>>();
+        assert_eq!(lines(80), ["12/19 moves · ←↑↓→ wasd move · u undo · r restart"]);
+        assert_eq!(lines(40), ["12/19 moves · ←↑↓→ wasd move · u undo", "r restart"]);
+        // Items wider than the line are broken inside, as a last resort.
+        assert_eq!(lines(5), ["12/19", " move", "s", "←↑↓→ ", "wasd ", "move", "u und", "o", "r res", "tart"]);
     }
 
     #[test]

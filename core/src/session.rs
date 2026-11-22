@@ -2,8 +2,14 @@
 // SPDX-FileCopyrightText: 2026 Maksym Motorny
 
 //! A play session: the game plus everything around it that every front end shares — undo, the
-//! level's par, animations (door slides, the winning logo flip) and the tape of consciousness
-//! that can be scrubbed after winning.
+//! level's par, the predicted rest of history, paradoxes, animations (door slides, the winning
+//! logo flip, the universe collapsing) and the tape of consciousness that can be scrubbed after
+//! winning.
+//!
+//! The universe is strongly deterministic: the screen always shows one consistent history, your
+//! lived worldline plus the solver's prediction of the rest of it (so your future selves are
+//! visible before you become them). Deviate from the prediction and the solver finds a new
+//! consistent history; if none exists, you've caused a paradox.
 //!
 //! Front ends feed [`Input`]s, draw [`Session::screen`], and call [`Session::advance`] whenever
 //! [`Session::next_deadline`] passes. Animations are timed in milliseconds and skipped by any
@@ -20,8 +26,26 @@ use crate::view::{self, Glyph, Hint, Replay};
 pub const ANIMATION_FRAME_MS: u32 = 83;
 /// One tape frame at 1×, "on threes" (8 frames per second, as in limited animation).
 pub const TAPE_FRAME_MS: u32 = 125;
-/// The longest solution the par search considers.
-const PAR_SEARCH_MOVES: usize = 80;
+/// The longest solution the par search and the prediction consider (in practice, the time
+/// window keeps the search small).
+const SEARCH_MOVES: usize = 10_000;
+/// Collapse frames after a paradox (at 8 every cell has turned to static).
+const COLLAPSE_STAGES: u32 = 8;
+/// How collapsed the board stays afterwards: enough static to read as broken, little enough to
+/// still see what happened.
+const COLLAPSED: u32 = 3;
+
+/// The bonus for replaying the solver's original solution exactly.
+const BONUS: &str = "strong determinism";
+
+/// Why the universe collapsed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Paradox {
+    /// A later self closed a door an earlier self had already walked through.
+    BrokePast,
+    /// No consistent history leads to the finish any more.
+    NoWayOut,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Input {
@@ -49,6 +73,9 @@ pub enum Input {
 struct Frame {
     door_overrides: Vec<(Pos, char)>,
     title: Option<Vec<Vec<Glyph>>>,
+    collapse: Option<u32>,
+    /// The strong determinism bonus being revealed: how many letters from each end are showing.
+    reveal: Option<usize>,
     ms: u32,
 }
 
@@ -111,6 +138,14 @@ pub struct Session {
     par: Option<u32>,
     /// Every earlier state of this attempt, for undo.
     history: Vec<Game>,
+    /// The moves of this attempt, matching `history`.
+    path: Vec<Dir>,
+    /// The history shown before the first move. Living your future selves exactly as you saw them
+    /// there earns the "strong determinism" bonus.
+    foreseen: Option<Game>,
+    /// The whole history the universe would have: the lived game plus the predicted rest.
+    prediction: Option<Game>,
+    paradox: Option<Paradox>,
     tape: Option<Tape>,
     /// Animation frames still to show, front first.
     animation: VecDeque<Frame>,
@@ -121,14 +156,59 @@ pub struct Session {
 
 impl Session {
     pub fn new(level: Level) -> Self {
-        let par = crate::solver::par(&level, PAR_SEARCH_MOVES);
-        Self::with_par(level, par)
+        let game = Game::new(level.clone());
+        let solution = crate::solver::shortest_solution(&level, SEARCH_MOVES);
+        let mut session = Self {
+            par: solution.as_ref().map(|s| s.len() as u32),
+            level,
+            game,
+            history: Vec::new(),
+            path: Vec::new(),
+            foreseen: None,
+            prediction: None,
+            paradox: None,
+            tape: None,
+            animation: VecDeque::new(),
+            tape_pending: false,
+            legend: false,
+        };
+        session.predict();
+        session.foreseen = session.prediction.clone();
+        session
     }
 
-    /// A session with a known par, skipping the search.
-    pub fn with_par(level: Level, par: Option<u32>) -> Self {
-        let game = Game::new(level.clone());
-        Self { level, game, par, history: Vec::new(), tape: None, animation: VecDeque::new(), tape_pending: false, legend: false }
+    /// Why the universe collapsed, if it did.
+    pub fn paradox(&self) -> Option<Paradox> {
+        self.paradox
+    }
+
+    /// Re-solves the rest of history after the lived game changed.
+    fn predict(&mut self) {
+        self.prediction = None;
+        self.paradox = None;
+        if self.game.status() == Status::Exited {
+            return;
+        }
+        let found = if self.game.is_consistent() {
+            crate::solver::completion(&self.game, SEARCH_MOVES).ok_or(Paradox::NoWayOut)
+        } else {
+            Err(Paradox::BrokePast)
+        };
+        match found {
+            Ok(moves) => {
+                let mut history = self.game.clone();
+                for dir in moves {
+                    history.step(dir);
+                }
+                self.prediction = Some(history);
+            }
+            Err(paradox) => {
+                self.paradox = Some(paradox);
+                for stage in 1..=COLLAPSE_STAGES {
+                    self.animation.push_back(Frame { collapse: Some(stage), ms: ANIMATION_FRAME_MS, ..Frame::default() });
+                }
+            }
+        }
     }
 
     pub fn game(&self) -> &Game {
@@ -150,17 +230,21 @@ impl Session {
             Input::Move(dir) => self.step(dir),
             Input::Undo => {
                 if let Some(previous) = self.history.pop() {
+                    self.path.pop();
                     let before = self.game.doors_at(self.game.now());
                     self.game = previous;
                     self.tape = None;
                     self.animate_doors(&before);
+                    self.predict();
                 }
             }
             Input::ToggleLegend => self.legend = !self.legend,
             Input::Restart => {
                 self.game = Game::new(self.level.clone());
                 self.history.clear();
+                self.path.clear();
                 self.tape = None;
+                self.predict();
             }
             tape_input => {
                 let Some(tape) = self.tape.as_mut() else { return };
@@ -183,8 +267,8 @@ impl Session {
     }
 
     fn step(&mut self, dir: Dir) {
-        if self.game.status() == Status::Exited {
-            return; // nothing to move once the level is over
+        if self.game.status() == Status::Exited || self.paradox.is_some() {
+            return; // nothing to move once the level is over or the universe has collapsed
         }
         let before = self.game.doors_at(self.game.now());
         let snapshot = self.game.clone();
@@ -192,10 +276,20 @@ impl Session {
             return;
         }
         self.history.push(snapshot);
+        self.path.push(dir);
         self.animate_doors(&before);
+        self.predict();
         if self.game.status() == Status::Exited {
             self.celebrate();
         }
+    }
+
+    /// Whether this attempt finished with every self after the first doing exactly what the
+    /// universe showed it doing before the first move: the future selves you saw at the start,
+    /// lived by memory, mirrored in time. The first stretch (the route to the mirror) is yours.
+    pub fn strongly_determined(&self) -> bool {
+        let Some(foreseen) = self.foreseen.as_ref() else { return false };
+        self.game.status() == Status::Exited && self.game.segments().get(1..) == foreseen.segments().get(1..)
     }
 
     /// Queues the slide of every door that opened or closed since `before`.
@@ -225,9 +319,19 @@ impl Session {
     fn celebrate(&mut self) {
         let logo = crate::title::logo();
         let full = logo.len();
-        self.animation.push_back(Frame { ms: 250, ..Frame::default() });
+        let bonus = self.strongly_determined();
+        let hidden = bonus.then_some(0); // the bonus stays hidden until its reveal
+        self.animation.push_back(Frame { reveal: hidden, ms: 250, ..Frame::default() });
+        // A half turn (the logo reads the same rotated).
         for height in (1..full).rev().chain(1..=full) {
-            self.animation.push_back(Frame { title: Some(squashed(&logo, height)), ms: ANIMATION_FRAME_MS, ..Frame::default() });
+            let title = Some(squashed(&logo, height));
+            self.animation.push_back(Frame { title, reveal: hidden, ms: ANIMATION_FRAME_MS, ..Frame::default() });
+        }
+        if bonus {
+            // "strong determinism" appears from both ends toward the middle, like the run itself.
+            for k in 1..=BONUS.chars().count().div_ceil(2) {
+                self.animation.push_back(Frame { reveal: Some(k), ms: ANIMATION_FRAME_MS, ..Frame::default() });
+            }
         }
         self.animation.push_back(Frame { ms: 400, ..Frame::default() });
         self.tape_pending = true;
@@ -274,17 +378,72 @@ impl Session {
         }
     }
 
-    /// The screen as it should look right now.
-    pub fn screen(&self, playing: &[Hint], exited: &[Hint]) -> view::Screen {
+    /// The screen as it should look right now. `over` are the hints after a paradox.
+    pub fn screen(&self, playing: &[Hint], exited: &[Hint], over: &[Hint]) -> view::Screen {
         let frame = self.animation.front();
-        let extras = view::Extras {
+        let mut extras = view::Extras {
             par: self.par,
             door_overrides: frame.map_or(&[], |f| f.door_overrides.as_slice()),
             replay: self.tape.as_ref().map(Tape::replay),
             title: frame.and_then(|f| f.title.as_deref()),
             legend: self.legend,
+            lived: None,
+            collapse: frame.and_then(|f| f.collapse),
         };
-        view::screen_with(&self.game, playing, exited, &extras)
+        let separator = || view::colored(" · ", view::Color::Hint);
+
+        if let Some(paradox) = self.paradox {
+            extras.collapse = extras.collapse.or(Some(COLLAPSED));
+            let mut screen = view::screen_with(&self.game, playing, exited, &extras);
+            let reason = match paradox {
+                Paradox::BrokePast => "✗ paradox: you closed a door your past self walked through",
+                Paradox::NoWayOut => "✗ paradox: no consistent way out remains",
+            };
+            screen.status = view::colored(reason, view::Color::Key);
+            if !over.is_empty() {
+                screen.status.extend(separator());
+                screen.status.extend(view::hint_glyphs(over));
+            }
+            return screen;
+        }
+
+        let Some(prediction) = self.prediction.as_ref().filter(|_| self.tape.is_none()) else {
+            // The level is over: the lived history is the whole history.
+            let mut screen = view::screen_with(&self.game, playing, exited, &extras);
+            if self.game.status() == Status::Exited {
+                screen.status = view::status_line(&self.game, playing, &[], self.par);
+                if self.strongly_determined() {
+                    screen.status.extend(separator());
+                    // While it's revealed, the letters arriving from the start are red and those
+                    // from the end blue: forward and inverted, meeting in the middle. Then plain.
+                    let shown = frame.and_then(|f| f.reveal);
+                    let n = BONUS.chars().count();
+                    for (i, ch) in BONUS.chars().enumerate() {
+                        let glyph = match shown {
+                            None => Glyph::new(ch, view::Color::Key),
+                            Some(k) if i < k => Glyph::new(ch, view::Color::Red),
+                            Some(k) if i >= n - k.min(n) => Glyph::new(ch, view::Color::Blue),
+                            Some(_) => Glyph::BLANK,
+                        };
+                        screen.status.push(glyph);
+                    }
+                }
+                if !exited.is_empty() {
+                    screen.status.extend(separator());
+                    screen.status.extend(view::hint_glyphs(exited));
+                }
+            }
+            return screen;
+        };
+
+        // Playing: show the whole predicted history at the lived moment, the lived self in control.
+        let segments = self.game.segments();
+        let controlled = segments.len() - 1;
+        extras.replay = Some(Replay { t: self.game.now(), controlled });
+        extras.lived = Some((segments.len(), segments[controlled].path.len()));
+        let mut screen = view::screen_with(prediction, playing, exited, &extras);
+        screen.status = view::status_line(&self.game, playing, exited, self.par);
+        screen
     }
 }
 
@@ -310,7 +469,7 @@ mod tests {
     use Dir::*;
 
     fn session() -> Session {
-        Session::with_par(Level::parse(crate::levels::FREEPORT).unwrap(), Some(19))
+        Session::new(Level::parse(crate::levels::FREEPORT).unwrap())
     }
 
     fn play(s: &mut Session, moves: &str) {
@@ -394,12 +553,76 @@ mod tests {
     #[test]
     fn the_legend_toggles() {
         let mut s = session();
-        let rows = |s: &Session| s.screen(&[], &[]).timeline.len();
+        let rows = |s: &Session| s.screen(&[], &[], &[]).timeline.len();
         let timeline = rows(&s);
         s.input(Input::ToggleLegend);
-        assert_eq!(s.screen(&[], &[]).timeline[0][0].ch, '●');
+        assert_eq!(s.screen(&[], &[], &[]).timeline[0][0].ch, '●');
         s.input(Input::ToggleLegend);
         assert_eq!(rows(&s), timeline);
+    }
+
+    fn plain_rows(rows: &[Vec<Glyph>]) -> Vec<String> {
+        rows.iter().map(|r| r.iter().map(|g| view::monochrome(*g).ch).collect::<String>().trim_end().to_string()).collect()
+    }
+
+    #[test]
+    fn the_future_self_is_visible_before_you_become_it() {
+        let s = session();
+        let screen = s.screen(&[], &[], &[]);
+        let board = plain_rows(&screen.board);
+        assert!(board[2].ends_with("⠀ ◇"), "{board:?}"); // you, later, on the finish at t = 0
+        assert_eq!(plain_rows(&screen.timeline)[3], "  ◇╋╌╌╌╌╌╌╌┛"); // a predicted lane, dashed
+    }
+
+    #[test]
+    fn wandering_before_the_turnstile_never_causes_a_paradox() {
+        let mut s = session();
+        play(&mut s, "dd");
+        for _ in 0..40 {
+            play(&mut s, "sw");
+        }
+        assert_eq!((s.paradox(), s.game().now()), (None, 82));
+    }
+
+    #[test]
+    fn closing_a_door_your_past_self_walked_through_is_a_paradox() {
+        let mut s = session();
+        // Across the mirror, back onto the blue trapdoor at t = 7, and across again: you now stand
+        // on the red trapdoor at the moment your past self walked through the red door.
+        play(&mut s, "ddwwdddddddaa");
+        assert_eq!(s.paradox(), Some(Paradox::BrokePast));
+        play(&mut s, "d"); // nothing moves once the universe has collapsed
+        assert_eq!(s.game().moves(), 13);
+        s.input(Input::Undo);
+        assert_eq!(s.paradox(), None);
+    }
+
+    #[test]
+    fn strong_determinism_means_living_your_future_selves_as_foreseen() {
+        let mut s = session();
+        play(&mut s, PERFECT);
+        assert!(s.strongly_determined());
+        let mut other_route = session();
+        play(&mut other_route, "ddwdwddddddddwwdddd"); // another way to the mirror: still yours to choose
+        assert!(other_route.strongly_determined());
+        let mut deviated = session();
+        play(&mut deviated, "ddwwdddddddddwdwddd"); // the inverted half differs from what you saw
+        assert_eq!(deviated.game().status(), Status::Exited);
+        assert!(!deviated.strongly_determined());
+    }
+
+    #[test]
+    fn the_bonus_is_revealed_from_both_ends() {
+        let mut s = session();
+        play(&mut s, PERFECT);
+        let mut seen = Vec::new();
+        while !s.on_tape() {
+            let status: String = s.screen(&[], &[], &[]).status.iter().map(|g| g.ch).collect();
+            seen.push(status.trim_end().to_string());
+            s.advance();
+        }
+        assert!(seen.iter().any(|l| l.ends_with("· s                m")));
+        assert!(seen.iter().any(|l| l.ends_with("· strong d  erminism")));
     }
 
     #[test]

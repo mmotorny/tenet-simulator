@@ -18,6 +18,8 @@ const PLAYING_HINTS: &[view::Hint] = &[("←↑↓→ wasd swipe", "move"), ("u"
 const EXITED_HINTS: &[view::Hint] =
     &[("j", "rewind"), ("k", "pause"), ("l", "play"), (", .", "step"), ("u", "undo"), ("r", "restart"), ("?", "legend")];
 
+const PARADOX_HINTS: &[view::Hint] = &[("u", "undo"), ("r", "restart")];
+
 /// JetBrains Mono (loaded by the page), then the GitHub monospace stack as fallback.
 const FONT_FAMILY: &str =
     "\"JetBrains Mono\", ui-monospace, SFMono-Regular, \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace";
@@ -95,7 +97,7 @@ impl WebGame {
 
         ctx.set_font(&format!("100px {FONT_FAMILY}"));
         let advance = ctx.measure_text("0")?.width() / 100.0;
-        let screen = self.session.screen(PLAYING_HINTS, EXITED_HINTS);
+        let screen = self.session.screen(PLAYING_HINTS, EXITED_HINTS, PARADOX_HINTS);
         let grid = Grid::fit(css_w, css_h, dpr, advance, screen.min_size());
         let cells = screen.grid(grid.cols, grid.rows);
 

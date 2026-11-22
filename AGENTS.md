@@ -22,11 +22,12 @@
 
 ## Design constraints
 
+- Paradoxes: don't add special-case detection, verification or resolution logic around the prediction. The user decides how each paradox should resolve as they encounter it.
 - The web page is a terminal emulator: exactly the terminal's screen, one cell per glyph. No web-only decoration; any decoration is textual and shared.
 - One colorless Unicode glyph per cell (no emoji). Braille only for in-cell graphics, never as a dot-matrix surface.
-- Red and blue mean the arrow of time (forward, inverted) and nothing else.
+- Red and blue mean the arrow of time (forward, inverted) and nothing else. The one sanctioned exception: the strong determinism reveal animates its letters red from the start and blue from the end, meeting in the middle.
 - Plain text must keep every meaning: when color carries meaning, add a glyph swap in `view::monochrome`.
-- Rejected, don't re-propose: dashed glass (`╎ ┊ ¦`); glass as a thin wall between cells; glass inside the turnstile; a turnstile in the outer wall; a partial glass wall; thin line-art or 5-row block logos; light lines on the logo slab; walls around start/finish; start/finish inside doorways; `hjkl` for movement; strikethrough for a missed par; a wall flash on winning; selves stuck on start/finish outside their worldline.
+- Rejected, don't re-propose: dashed glass (`╎ ┊ ¦`); glass as a thin wall between cells; glass inside the turnstile; a turnstile in the outer wall; a partial glass wall; thin line-art or 5-row block logos; light lines on the logo slab; walls around start/finish; start/finish inside doorways; `hjkl` for movement; strikethrough for a missed par; a wall flash on winning; a double logo turn for the bonus; selves stuck on start/finish outside their worldline.
 
 ## Repository conventions
 

@@ -210,6 +210,31 @@ impl Game {
         doors
     }
 
+    /// Whether a door at `pos` (if it is one) is open at both `from` and `to` (global times):
+    /// the condition for walking into it.
+    fn door_passable(&self, pos: Pos, from: i32, to: i32) -> bool {
+        match self.level.tile(pos) {
+            Some(Tile::Entry) => self.level.entry_open_at(from) && self.level.entry_open_at(to),
+            Some(Tile::Exit) => self.level.exit_open_at(from) && self.level.exit_open_at(to),
+            Some(Tile::TurnstileDoor(side)) => {
+                self.turnstile_door_open_at(side, from) && self.turnstile_door_open_at(side, to)
+            }
+            _ => true,
+        }
+    }
+
+    /// Whether the whole history is consistent: every move of every self is still legal now that
+    /// all selves are known. A later self standing on a trapdoor can close a door an earlier self
+    /// already walked through; that history is a paradox.
+    pub fn is_consistent(&self) -> bool {
+        self.segments.iter().all(|s| {
+            (1..s.path.len()).all(|k| {
+                let to = s.start + k as i32 * s.arrow.dt();
+                self.door_passable(s.path[k], to - s.arrow.dt(), to)
+            })
+        })
+    }
+
     pub fn step(&mut self, dir: Dir) -> StepOutcome {
         if self.status == Status::Exited {
             return StepOutcome::Blocked;
@@ -332,6 +357,17 @@ mod tests {
         assert_eq!(g.step(East), StepOutcome::Blocked);
         play(&mut g, "ad"); // wait two moves: now t = 2
         assert_eq!(play(&mut g, "dd"), [StepOutcome::Moved, StepOutcome::Exited]);
+    }
+
+    #[test]
+    fn a_history_is_inconsistent_once_a_later_self_closes_a_door_already_walked_through() {
+        let mut g = Game::new(Level::parse(crate::levels::FREEPORT).unwrap());
+        play(&mut g, "ddwwddddddd"); // across the mirror at t = 9, then one inverted move
+        assert!(g.is_consistent());
+        // Back onto the blue trapdoor at t = 7 and across again: the re-inverted self stands on the
+        // red trapdoor at the moment the forward self was walking through the red door.
+        play(&mut g, "aa");
+        assert!(!g.is_consistent());
     }
 
     #[test]
