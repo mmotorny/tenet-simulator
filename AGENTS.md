@@ -35,7 +35,7 @@ Commands:
 | Doors (all doors) | `⠀` open → `⠉ ⠛ ⠿` → `⣿` closed (slide animation) | near-white |
 | Turnstile frame | `╭ ─ ╮ ╰ ╯` (thin, rounded) | red half / blue half |
 | Hint bar | keys bright, actions and `·` separators dim; arrows drawn as `←↑↓→` | near-white / dim gray |
-| Title logo | thin line art, reads the same rotated 180° (`ET` is `TE` upside down); `core/src/title.rs` | `TE` red, `N` neutral, `ET` blue |
+| Title logo | bold block letters (`█ ▀ ▄` + quadrants), widely spaced like the poster; reads the same rotated 180° (`T E N Ǝ ⊥`); `core/src/title.rs` | `TE` red, `N` neutral, `ET` blue |
 
 - Glass has **no solid junction glyphs** where it meets walls; the dotted rhythm reads as touching.
 - Rejected: dashed glass (`╎ ┊ ¦`), glass inside the turnstile, turnstile embedded in the outer wall, a partial glass wall, Braille as a full rendering surface.
@@ -73,3 +73,4 @@ Commands:
 - Diagrams must stay readable as plain text: the CLI honors `NO_COLOR`, and glyphs (not just color) distinguish forward from inverted.
 - Licensed BSD-3-Clause (`LICENSE`). Every source file starts with SPDX headers:
   `// SPDX-License-Identifier: BSD-3-Clause` and `// SPDX-FileCopyrightText: 2026 Maksym Motorny`.
+- Block elements (`█ ▀ ▄ ▌ ▐` and quadrants) are painted as solid rectangles by the web page and the SVG export, like a terminal emulator does, so they join seamlessly. The quadrant table lives in `view::block_quadrants` (mirrored in `web/www/main.js`).

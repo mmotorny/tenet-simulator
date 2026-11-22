@@ -261,6 +261,30 @@ impl Screen {
     }
 }
 
+/// Which quadrants of the cell a block-element glyph fills: upper-left, upper-right, lower-left,
+/// lower-right. Front ends that don't draw text into exact cells (SVG, the web page) paint these
+/// as rectangles, the way terminal emulators do, so blocks join seamlessly across cells.
+pub fn block_quadrants(ch: char) -> Option<[bool; 4]> {
+    Some(match ch {
+        '█' => [true, true, true, true],
+        '▀' => [true, true, false, false],
+        '▄' => [false, false, true, true],
+        '▌' => [true, false, true, false],
+        '▐' => [false, true, false, true],
+        '▘' => [true, false, false, false],
+        '▝' => [false, true, false, false],
+        '▖' => [false, false, true, false],
+        '▗' => [false, false, false, true],
+        '▚' => [true, false, false, true],
+        '▞' => [false, true, true, false],
+        '▛' => [true, true, true, false],
+        '▜' => [true, true, false, true],
+        '▙' => [true, false, true, true],
+        '▟' => [false, true, true, true],
+        _ => return None,
+    })
+}
+
 /// Renders rows as a standalone SVG image. Every glyph is placed at its exact grid position, so
 /// rows stay aligned whatever fonts the viewer substitutes (unlike text in a Markdown code block).
 pub fn to_svg(rows: &[Vec<Glyph>]) -> String {
@@ -286,6 +310,22 @@ pub fn to_svg(rows: &[Vec<Glyph>]) -> String {
             }
             let (r, g, b) = glyph.color.map_or((200, 200, 200), Color::rgb);
             let cx = PAD + (x as f32 + 0.5) * CELL_W;
+            if let Some(quadrants) = block_quadrants(glyph.ch) {
+                let (left, top) = (cx - CELL_W / 2.0, PAD + y as f32 * CELL_H);
+                for (i, filled) in quadrants.into_iter().enumerate() {
+                    if filled {
+                        let qx = left + (i % 2) as f32 * CELL_W / 2.0;
+                        let qy = top + (i / 2) as f32 * CELL_H / 2.0;
+                        svg.push_str(&format!(
+                            "<rect x=\"{qx}\" y=\"{qy}\" width=\"{}\" height=\"{}\" \
+                             fill=\"rgb({r},{g},{b})\" shape-rendering=\"crispEdges\"/>\n",
+                            CELL_W / 2.0,
+                            CELL_H / 2.0
+                        ));
+                    }
+                }
+                continue;
+            }
             // Diagonals as lines from corner to corner, so they join across rows like in a terminal.
             if glyph.ch == '╲' || glyph.ch == '╱' {
                 let (left, right) = (cx - CELL_W / 2.0, cx + CELL_W / 2.0);
@@ -376,10 +416,10 @@ mod tests {
         let rows = screen(&game, &[("q", "quit")], &[]).stacked(true);
         let text = to_plain_text(&rows);
         let lines: Vec<&str> = text.lines().collect();
-        // Title (33 wide) is the widest block; the 29-wide map is indented by two, the label hangs.
-        assert!(lines[0].starts_with("╶─┬─╴"));
-        assert!(lines[6].starts_with("  ┏━━"));
-        assert!(lines[8].ends_with("⠀    t = 0 ▲"));
+        // Title (55 wide) is the widest block; the 29-wide map is indented by 13, the label hangs.
+        assert!(lines[0].starts_with("▀▀▀▀█▀▀▀▀"));
+        assert!(lines[5].starts_with("             ┏━━"));
+        assert!(lines[7].ends_with("⠀    t = 0 ▲"));
         assert_eq!(lines.last().unwrap().trim(), "q quit");
     }
 
@@ -389,6 +429,10 @@ mod tests {
         let svg = to_svg(&rows);
         assert_eq!(svg.matches("<text ").count(), 5); // the space is skipped
         assert_eq!(svg.matches("<line ").count(), 1); // the diagonal is drawn as a line
+
+        let blocks = to_svg(&[text("█▀", Some(Color::Red))]);
+        assert_eq!(blocks.matches("<rect x=").count(), 6); // block quadrants become rectangles
+        assert!(!blocks.contains("<text "));
         assert_eq!(svg.matches("textLength").count(), 3); // only box-drawing glyphs are stretched
         assert!(svg.contains("&lt;"));
     }

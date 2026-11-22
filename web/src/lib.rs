@@ -125,7 +125,7 @@ mod tests {
         assert_eq!(game.board_width(), 29);
         let status: String = game.status().chars().step_by(2).collect();
         assert_eq!(status, "←↑↓→ wasd hjkl swipe move · r restart");
-        assert_eq!(game.title().split('\n').count(), 5);
+        assert_eq!(game.title().split('\n').count(), 4);
     }
 
     #[test]

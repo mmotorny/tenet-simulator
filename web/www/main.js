@@ -18,6 +18,24 @@ const KEYS = {
 };
 const SWIPE_MIN_PX = 24;
 
+// Block elements, as filled quadrants (upper-left, upper-right, lower-left, lower-right). Like a
+// terminal emulator, the page paints these as solid rectangles instead of font glyphs, so blocks
+// join seamlessly across cells. Mirrors view::block_quadrants in the core.
+const QUADRANTS = {
+  "█": "1111", "▀": "1100", "▄": "0011", "▌": "1010", "▐": "0101",
+  "▘": "1000", "▝": "0100", "▖": "0010", "▗": "0001", "▚": "1001", "▞": "0110",
+  "▛": "1110", "▜": "1101", "▙": "1011", "▟": "0111",
+};
+
+// One conic gradient paints all four quadrants as a single full-cell layer (clockwise from the
+// top: upper-right, lower-right, lower-left, upper-left). Separate half-size layers would get
+// their sizes rounded to device pixels and leave hairline seams inside the cell.
+function paintBlock(cell, mask) {
+  const [ul, ur, ll, lr] = [...mask].map((bit) => (bit === "1" ? "currentColor" : "transparent"));
+  cell.classList.add("block");
+  cell.style.setProperty("--quadrants", `conic-gradient(${ur} 0 25%, ${lr} 0 50%, ${ll} 0 75%, ${ul} 0)`);
+}
+
 const term = document.getElementById("term");
 const title = document.getElementById("title");
 const board = document.getElementById("board");
@@ -31,9 +49,11 @@ function show(el, encodedRows) {
       const chars = [...encoded];
       for (let i = 0; i + 1 < chars.length; i += 2) {
         const cell = document.createElement("span");
-        cell.textContent = chars[i];
+        const mask = QUADRANTS[chars[i]];
+        if (mask) paintBlock(cell, mask);
+        else cell.textContent = chars[i];
         const color = COLOR_CLASSES[chars[i + 1]];
-        if (color) cell.className = color;
+        if (color) cell.classList.add(color);
         row.append(cell);
       }
       return row;

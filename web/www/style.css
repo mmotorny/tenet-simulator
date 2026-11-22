@@ -41,6 +41,11 @@ body {
   width: calc(var(--width) * 1ch);
 }
 
+/* The logo is the widest block: shrink it to fit narrow screens (a cell is about 0.6em wide). */
+#title {
+  font-size: min(1em, calc(94vw / (var(--width) * 0.6)));
+}
+
 #term div > div {
   height: 1lh;
 }
@@ -52,6 +57,20 @@ body {
   overflow: hidden;
   text-align: center;
   vertical-align: top;
+}
+
+/* Block elements are painted, not drawn from a font. The paint bleeds a fraction of a pixel past
+   the cell so neighbouring blocks join without anti-aliasing seams at fractional cell edges. */
+#term span.block {
+  position: relative;
+  overflow: visible;
+}
+
+#term span.block::before {
+  content: "";
+  position: absolute;
+  inset: -0.4px;
+  background: var(--quadrants);
 }
 
 .red { color: rgb(230 70 60); }
