@@ -1,0 +1,8 @@
+[package]
+name = "tenet-core"
+version = "0.1.0"
+edition = "2021"
+license = "BSD-3-Clause"
+description = "Deterministic simulation core: levels, rules, and a renderer-agnostic view"
+
+[dependencies]

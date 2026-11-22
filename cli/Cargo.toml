@@ -1,0 +1,14 @@
+[package]
+name = "tenet-cli"
+version = "0.1.0"
+edition = "2021"
+license = "BSD-3-Clause"
+description = "Terminal front end for the Tenet simulator"
+
+[[bin]]
+name = "tenet"
+path = "src/main.rs"
+
+[dependencies]
+tenet-core = { path = "../core" }
+crossterm = "0.28"
