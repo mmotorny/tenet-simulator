@@ -1,0 +1,13 @@
+[package]
+name = "tenet-web"
+version = "0.1.0"
+edition = "2021"
+license = "BSD-3-Clause"
+description = "WebAssembly bindings for the Tenet simulator web front end"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+tenet-core = { path = "../core" }
+wasm-bindgen = "=0.2.130"

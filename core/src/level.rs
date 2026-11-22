@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn bundled_level_parses() {
-        let level = Level::parse(include_str!("../../levels/freeport.txt")).unwrap();
+        let level = Level::parse(crate::levels::FREEPORT).unwrap();
         assert_eq!(level.entry(), Pos::new(0, 6));
         assert_eq!(level.exit(), Pos::new(14, 2));
     }

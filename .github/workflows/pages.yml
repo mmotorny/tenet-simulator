@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# SPDX-FileCopyrightText: 2026 Maksym Motorny
+
+# Tests the workspace, builds the web front end, and publishes it to GitHub Pages under an
+# unguessable path. The path only matters while the repository is private; once it goes public,
+# drop SITE_PATH and publish at the site root.
+
+name: Deploy web
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  # 256 random bits. The site is reachable only at this path.
+  SITE_PATH: 4f357ccef236ef632a6d7ac18616223c09b29869ebd29443632b86a71370ae2b
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}${{ env.SITE_PATH }}/
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup target add wasm32-unknown-unknown && rustup component add clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.130
+      - run: cargo test --workspace
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: ./build-web.sh
+      - name: Place the build under the site path
+        run: |
+          mkdir -p site
+          cp -r web/www "site/$SITE_PATH"
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4

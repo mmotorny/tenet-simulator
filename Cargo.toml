@@ -1,3 +1,8 @@
 [workspace]
 resolver = "2"
-members = ["core", "cli"]
+members = ["core", "cli", "web"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1

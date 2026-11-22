@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn turnstile_is_a_passage_through_the_glass() {
-        let level = Level::parse(include_str!("../../levels/freeport.txt")).unwrap();
+        let level = Level::parse(crate::levels::FREEPORT).unwrap();
         let mut g = Game::new(level);
         let route = "ddddwwdddddddddwwd";
         for (i, ch) in route.chars().enumerate() {

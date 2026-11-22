@@ -9,14 +9,15 @@ A simulator of strong determinism and time inversion, inspired by Nolan's *Tenet
 ## Code layout
 
 - Rust Cargo workspace.
-- `core/` (`tenet-core`): level parsing, game rules, and a renderer-agnostic view (rows of glyph + color). No I/O and no dependencies, so it can compile to WebAssembly for the web front end later.
+- `core/` (`tenet-core`): level parsing, game rules, and a renderer-agnostic view (rows of glyph + color). No I/O and no dependencies, so it compiles to WebAssembly.
+- `core/levels/`: level maps, one character per cell (legend in `core/src/level.rs`), bundled via `core/src/levels.rs`.
 - `cli/` (`tenet-cli`, binary `tenet`): terminal front end built on crossterm.
-- `levels/`: level maps, one character per cell (legend in `core/src/level.rs`).
+- `web/` (`tenet-web`): wasm-bindgen wrapper (`src/`) and the static page (`www/`). `./build-web.sh` builds it; CI deploys it to GitHub Pages under an unguessable path while the repo is private (see `.github/workflows/pages.yml`).
 
 Commands:
 - `cargo run` — play interactively (arrows / wasd / hjkl, `q` to quit).
 - `cargo run -- --moves ddddww --trace` — scripted run that prints every frame. Use this to discuss runs as text.
-- `cargo test`, `cargo clippy --all-targets` — keep both clean.
+- `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings` — keep both clean (CI enforces it).
 
 ## Visual vocabulary
 

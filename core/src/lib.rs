@@ -7,4 +7,5 @@
 
 pub mod game;
 pub mod level;
+pub mod levels;
 pub mod view;

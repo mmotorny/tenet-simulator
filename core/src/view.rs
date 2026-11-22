@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn renders_the_bundled_level() {
-        let game = Game::new(Level::parse(include_str!("../../levels/freeport.txt")).unwrap());
+        let game = Game::new(Level::parse(crate::levels::FREEPORT).unwrap());
         let expected = "\
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ · · · · · · ⋮ · · · · · · ┃
@@ -192,7 +192,7 @@ mod tests {
 
     #[test]
     fn turnstile_halves_are_red_and_blue() {
-        let game = Game::new(Level::parse(include_str!("../../levels/freeport.txt")).unwrap());
+        let game = Game::new(Level::parse(crate::levels::FREEPORT).unwrap());
         let rows = render(&game);
         assert_eq!(rows[3][10].color, Some(Color::Red)); // ╭
         assert_eq!(rows[3][18].color, Some(Color::Blue)); // ╮

@@ -19,7 +19,7 @@ use tenet_core::game::{Dir, Game, Status, StepOutcome};
 use tenet_core::level::Level;
 use tenet_core::view::{self, Color, Glyph};
 
-const DEFAULT_LEVEL: &str = include_str!("../../levels/freeport.txt");
+const DEFAULT_LEVEL: &str = tenet_core::levels::FREEPORT;
 
 struct Options {
     level_path: Option<String>,
